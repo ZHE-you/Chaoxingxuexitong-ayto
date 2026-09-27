@@ -28,6 +28,11 @@
 ├── xuexitong.user.js     # 唯一脚本文件：控制台 + 油猴通用
 ├── tests/
 │   └── verify-v3.mjs     # 语法校验（node --check）
+├── proxy/                # AI 答题中转代理（解决浏览器跨域 + 隐藏 Key）
+│   ├── README.md             # 部署与使用说明
+│   ├── local-proxy.mjs       # 本地 Node 版（零依赖，npm run proxy）
+│   ├── cloudflare-worker.js  # Cloudflare Worker 版
+│   └── wrangler.toml         # Worker 部署配置模板
 ├── img/                  # 文档截图与赞赏码
 ├── archive/              # 历史版本（v2 / 旧版）及旧文档
 │   ├── v2.js
@@ -90,7 +95,36 @@ app.nextUnit();   // 手动切换到下一小节
 - **启用**：展开面板「🤖 AI 答题」→ 勾选「启用自动答题」。脚本每 2.5 秒扫描题目（主页面 + 同域 iframe），命中即答。
 - **题库优先**：用「导入题库」载入整理好的 `JSON`（`{"题目":"答案"}` 或 `[{"q":"...","a":"..."}]`）；答对/搜到的题会沉淀进「导出题库」，下次直接命中，省 token。题库经 `localStorage` 保存。
 - **AI 兜底**：题库未命中时把题目与选项发给大模型取答案。在「API 设置」里填：
-  - **API 地址**：OpenAI 兼容的 `/v1/chat/completions` 端点。⚠️ 官方 DeepSeek/OpenAI 接口默认禁止浏览器跨域，请填你自建的**中转代理**地址（Cloudflare Worker / one-api / nginx 反代）。
+**🔌 必须先跑一个中转代理（关键）**
+
+浏览器直连大模型官方接口（DeepSeek / OpenAI）会被 **CORS 跨域策略拦截**，因此 AI 答题必须经过中转代理。本仓库已在 [`proxy/`](proxy/README.md) 提供开箱即用的两种方案：
+
+```bash
+# 最省事：本地 Node 代理（零依赖，Node 20+ 自带 fetch）
+UPSTREAM_KEY=sk-你的密钥 npm run proxy
+```
+
+启动后在面板「API 设置」里填：
+
+| 项目 | 值 |
+|---|---|
+| API 地址 | `http://127.0.0.1:8787/v1/chat/completions` |
+| API Key | 你的真实密钥（若设了 `PROXY_TOKEN` 则填该口令） |
+| 模型名 | `deepseek-chat` |
+
+想多设备 / 长期在线用，改用 Cloudflare Worker 版（免费额度足够，Key 存云端）：
+
+```bash
+cd proxy
+npx wrangler login
+npx wrangler secret put UPSTREAM_KEY
+npx wrangler deploy
+```
+
+部署后 API 地址填 `https://<你的 Worker 域名>/v1/chat/completions`。详细环境变量、自测 curl 命令与安全提醒见 [`proxy/README.md`](proxy/README.md)。
+
+- **API 设置**项说明：
+  - **API 地址**：OpenAI 兼容的 `/v1/chat/completions` 端点，即上面代理的地址。
   - **API Key**：你的密钥（明文存于本机 `localStorage`，仅本机使用，公共电脑慎用）。
   - **模型名**：如 `deepseek-chat`（默认）。
 - **手动触发**：点「立即扫描」可立刻扫一轮（调试用）。
@@ -127,6 +161,7 @@ app.nextUnit();   // 手动切换到下一小节
 
 ```bash
 npm test            # 等价于 node tests/verify-v3.mjs
+npm run proxy       # 启动本地 AI 答题中转代理（详见 proxy/README.md）
 ```
 
 CI（`.github/workflows/verify.yml`）在每次 push / PR 时自动执行该校验。
@@ -145,6 +180,9 @@ CI（`.github/workflows/verify.yml`）在每次 push / PR 时自动执行该校�
 **Q：控制台一直刷 `$.getNetScroll is not a function` 怎么办？**
 这是**重复引入 jQuery** 造成的：学习通页面自带 jQuery（1.7.2），并在其上挂载了页面自己的插件（如 `$.getNetScroll`）。一旦再引入第二份 jQuery，页面的 `window.$` / `window.jQuery` 会被替换成新版本，页面插件随之丢失，页面代码每次调用就抛错并持续刷屏。
 本脚本自 **v3.3.1** 起已改为**复用页面自带 jQuery**、不再引入第二份 jQuery。若你仍在旧版本上遇到该报错，请更新脚本；另外请勿在控制台手动额外加载 jQuery，刷新页面后只执行脚本本身即可。
+
+**Q：AI 答题报 `Failed to fetch` / CORS 错误怎么办？**
+这是浏览器跨域策略拦截，**官方 DeepSeek / OpenAI 接口不允许浏览器直连**，必须走中转代理。请按 [AI 答题](#-ai-答题题库优先--ai-兜底) 小节的说明启动本地代理（`npm run proxy`）或部署 Cloudflare Worker，再把「API 地址」改成代理地址。若本地代理已启动仍失败：① 确认终端还开着；② 用 `curl` 自测代理本身是否通（命令见 `proxy/README.md`）；③ 少数浏览器会拦截 HTTPS 页面向 `http://127.0.0.1` 的请求，此时改用 Worker 版。返回 `401 未授权` 则是 Key / 访问口令不匹配。
 
 **Q：为什么倍速 / 任务点不被接受？**
 平台可能服务端强制倍速与完成情况，本脚本不尝试绕过，这属于平台限制。

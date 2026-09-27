@@ -1,0 +1,25 @@
+# Cloudflare Worker 部署配置模板
+# 用法：
+#   1. 在本目录执行 npx wrangler login        （首次登录）
+#   2. npx wrangler secret put UPSTREAM_KEY   （安全地写入上游真实密钥，不落盘）
+#   3. npx wrangler deploy                    （部署，会输出 https://xxx.<子域>.workers.dev）
+#
+# 部署后拿到地址，在脚本控制台面板「🤖 AI 答题 → API 设置」中填：
+#   API 地址 = https://xxx.<子域>.workers.dev/v1/chat/completions
+#   API Key  = ACCESS_TOKEN 的值（若未设置 ACCESS_TOKEN，则填你的真实 Key）
+#   API 模型 = deepseek-chat
+
+name = "xuexitong-ai-proxy"
+main = "cloudflare-worker.js"
+compatibility_date = "2026-09-27"
+
+# ⚠️ 不要把真实 Key 写在 vars 里（会被提交进 Git）。
+# 真实密钥请用：npx wrangler secret put UPSTREAM_KEY
+[vars]
+# 上游地址：DeepSeek 官方 / OpenAI / 自建 one-api 均可
+UPSTREAM_BASE = "https://api.deepseek.com/v1"
+# 建议设置一个自定义访问口令，防止 Worker 被别人白嫖
+# 设置后，脚本面板「API Key」一栏就要填这个值
+# ACCESS_TOKEN = "change-me-to-a-random-string"
+# 设为 "1" 时放行任意路径，默认只允许 /v1/chat/completions
+ALLOW_ANY_PATH = "0"

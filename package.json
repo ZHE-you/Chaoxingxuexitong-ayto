@@ -12,7 +12,8 @@
     "url": "https://github.com/ZHE-you/Chaoxingxuexitong-ayto/issues"
   },
   "scripts": {
-    "test": "node tests/verify-v3.mjs"
+    "test": "node tests/verify-v3.mjs",
+    "proxy": "node proxy/local-proxy.mjs"
   },
   "engines": {
     "node": ">=20.11.0"
