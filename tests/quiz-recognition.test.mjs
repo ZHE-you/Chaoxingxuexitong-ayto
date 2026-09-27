@@ -408,6 +408,46 @@ check('第 5 题两空分别填入（互为倒数 / 1/|A|）',
 const again = app._answerContainer(items3[0].block, 'fill', items3[0].ctrls);
 check('同一题不会被重复作答', again === false, '实际 ' + again);
 
+// ==================== 7. 回归：面板自识别 / 隐藏式选项 ====================
+console.log('\n=== 7. 回归测试（面板开关 / 隐藏式单选） ===');
+
+// 回归 1：脚本自身的控制面板里有 checkbox，绝不能被当成题目（曾把"静音播放"识别成多选题）
+const winP = mount(`
+<div id="xtControlPanel">
+  <div class="xt-body">
+    <label><input type="checkbox" id="p1"> 自动播放</label>
+    <label><input type="checkbox" id="p2"> 无视频跳过</label>
+    <label><input type="checkbox" id="p3"> 静音播放</label>
+    <label><input type="checkbox" id="p4"> 启用自动答题</label>
+  </div>
+</div>
+<div class="TiMu">
+  <div class="TiMu_title">1【单选题】下列叙述正确的是</div>
+  <label><input type="radio" name="pq">A 甲</label>
+  <label><input type="radio" name="pq">B 乙</label>
+</div>`);
+const itemsP = api._collectQuestionBlocks(winP.document);
+check('面板内的开关未被识别为题目（只识别出 1 道真题）', itemsP.length === 1, '实际 ' + itemsP.length);
+check('识别出的是单选题而非多选题',
+    itemsP.length === 1 && api._detectQuestionType(itemsP[0].block, itemsP[0].ctrls) === 'single',
+    itemsP.length ? api._detectQuestionType(itemsP[0].block, itemsP[0].ctrls) : '—');
+
+// 回归 2：学习通常把 radio 视觉隐藏，用 label / div 做外观，这类控件仍须可作答
+const winH = mount(`
+<div class="TiMu">
+  <div class="TiMu_title">2【单选题】隐藏式选项</div>
+  <div class="opt"><input type="radio" name="hq" id="h1" style="display:none"><label for="h1">A 甲选项</label></div>
+  <div class="opt"><input type="radio" name="hq" id="h2" style="display:none"><label for="h2">B 乙选项</label></div>
+</div>`);
+const itemsH = api._collectQuestionBlocks(winH.document);
+check('视觉隐藏的 radio 仍被收集', itemsH.length === 1 && itemsH[0].ctrls.length === 2,
+    '题块 ' + itemsH.length + '，控件 ' + (itemsH[0] ? itemsH[0].ctrls.length : 0));
+if (itemsH.length === 1) {
+    answer(itemsH[0].block, 'single', itemsH[0].ctrls, 'B');
+    const rs = winH.document.querySelectorAll('input[name=hq]');
+    check('隐藏式单选仍能按字母选中', rs[1].checked && !rs[0].checked, '');
+}
+
 console.log('\n========================================');
 console.log(fail === 0 ? '全部通过：' + pass + ' 项' : '通过 ' + pass + ' 项，失败 ' + fail + ' 项');
 console.log('========================================');

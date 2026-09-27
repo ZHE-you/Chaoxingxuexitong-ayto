@@ -2,7 +2,7 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Node](https://img.shields.io/badge/node-%3E%3D20.11-brightgreen.svg)](https://nodejs.org)
-[![Version](https://img.shields.io/badge/version-3.6.0-orange.svg)](package.json)
+[![Version](https://img.shields.io/badge/version-3.6.1-orange.svg)](package.json)
 [![Build](https://github.com/ZHE-you/Chaoxingxuexitong-ayto/actions/workflows/verify.yml/badge.svg)](https://github.com/ZHE-you/Chaoxingxuexitong-ayto/actions/workflows/verify.yml)
 
 > ⚠️ **免责声明**：本项目仅用于脚本调试、前端自动化研究与页面行为分析，请遵守目标平台（学习通 / 超星）的使用规定，勿用于违规用途。因使用本脚本产生的任何后果由使用者自行承担。
@@ -167,6 +167,24 @@ enc  ：md5("[clazzId][userId][jobid][objectId][playingTime*1000][d_yHJ!$pdA~5][
 - 面板状态会显示 `⚡快速` 与实时进度（如 `上报 116/600s (19.3%)`）
 
 > ⚠️ 该功能依赖服务端行为，**属于实验性能力**：不同学校 / 不同课程可能出现「学时打回」或风控。若发现某门课进度被清，请关闭此开关回到普通播放模式。如遇问题时请把控制台里 `[快速模式]` 开头的日志发到 Issues。
+
+### ⚠️ 官方 AI 的跨域限制（重要）
+
+「官方 AI」接口位于 `stat2-ans.chaoxing.com`，而课程页与测验页在 `mooc1.chaoxing.com` / `mooc2-ans.chaoxing.com`，**属于跨子域请求**，浏览器 `fetch` 会被 CORS 拦截，表现为：
+
+```
+Access to fetch at 'https://stat2-ans.chaoxing.com/...' has been blocked by CORS policy
+[AI答题] 失败：官方 AI 请求失败：Failed to fetch
+```
+
+三种解决办法（按推荐度排序）：
+
+1. **改 `@grant`（最省事）**：把脚本头部的 `// @grant none` 改成 `// @grant GM_xmlhttpRequest` 后重新安装。脚本检测到油猴的跨域能力后会自动改用 `GM_xmlhttpRequest` 绕开 CORS。
+   代价：脚本将运行在油猴沙箱中，控制台的 `app.run()` / `app.nextUnit()` 等命令不再可用。
+2. **改用「自定义接口」+ 中转代理**（见下方密钥章节），跨域问题由代理解决。
+3. **使用本地题库 / 外部题库**，不依赖 AI。
+
+> 脚本已内置检测：请求被跨域拦截时会在控制台直接给出上述解决建议，而不只是抛一个 `Failed to fetch`。
 
 ## ⚡ 快速学时上报模式（免真实播放）
 

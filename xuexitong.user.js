@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         学习通自动刷课脚本
 // @namespace    https://github.com/ZHE-you/Chaoxingxuexitong-ayto
-// @version      3.6.0
+// @version      3.6.1
 // @description  自动播放、自动切换下一节，并在页面结构异常时安全停止。单文件：可直接粘贴到浏览器控制台，也可导入 Tampermonkey。
 // @author       夏至子 (ZHE-you)
 // @homepageURL  https://github.com/ZHE-you/Chaoxingxuexitong-ayto
@@ -14,6 +14,12 @@
 // @run-at       document-idle
 // @grant        none
 // ==/UserScript==
+//
+// 提示：学习通官方 AI 接口位于 stat2-ans 域，而课程页在 mooc1 / mooc2-ans 域，
+// 属于跨子域请求，浏览器 fetch 会被 CORS 拦截（表现为 Failed to fetch）。
+// 若想让「官方 AI」在测验页可用，可把上面的「@grant none」改成
+// 「@grant GM_xmlhttpRequest」——脚本会自动改用 GM 请求绕过跨域；
+// 代价是脚本运行在油猴沙箱中，控制台的 app 命令（app.run() 等）将不可用。
 
 (function () {
     const APP_KEY = '__xuexitongPlayerV3';
@@ -179,6 +185,9 @@
         short: '简答题', essay: '论述题', entry: '分录题', sort: '排序题',
         match: '连线题', unknown: '未知题型',
     };
+    // 脚本自身控制面板的 id：识别题目时必须排除它（面板里也有 checkbox）
+    const PANEL_ID = 'xtControlPanel';
+
     // 主观题（需要用文字作答，且答案可能含多个要点）
     const SUBJECTIVE_TYPES = ['short', 'essay', 'term', 'entry', 'fill', 'cloze'];
 
@@ -1506,6 +1515,63 @@
                 return params;
             },
 
+            // 是否具备油猴的跨域请求能力
+            _hasGMRequest() {
+                try {
+                    if (typeof GM_xmlhttpRequest === 'function') return true;
+                    if (typeof window !== 'undefined' && typeof window.GM_xmlhttpRequest === 'function') return true;
+                } catch (e) { /* ignore */ }
+                return false;
+            },
+
+            // 跨域 POST：优先使用油猴的 GM_xmlhttpRequest（不受 CORS 限制），否则退回 fetch。
+            // 背景：学习通官方 AI 接口在 stat2-ans 域，而课程 / 测验页在 mooc1、mooc2-ans 域，
+            // 属于跨子域请求，浏览器 fetch 会被 CORS 拦截；只有 GM 请求能正常工作。
+            _crossPost(url, body, headers) {
+                const payload = JSON.stringify(body);
+                const hdrs = Object.assign({ 'Content-Type': 'application/json' }, headers || {});
+                let gm = null;
+                try {
+                    if (typeof GM_xmlhttpRequest === 'function') gm = GM_xmlhttpRequest;
+                    else if (typeof window !== 'undefined' && typeof window.GM_xmlhttpRequest === 'function') gm = window.GM_xmlhttpRequest;
+                } catch (e) { gm = null; }
+                if (gm) {
+                    return new Promise((resolve, reject) => {
+                        try {
+                            gm({
+                                method: 'POST',
+                                url: url,
+                                headers: hdrs,
+                                data: payload,
+                                timeout: 30000,
+                                onload: (r) => {
+                                    if (r.status >= 200 && r.status < 300) resolve(r.responseText || '');
+                                    else reject(new Error('HTTP ' + r.status + '：' + String(r.responseText || '').slice(0, 160)));
+                                },
+                                onerror: () => reject(new Error('GM 请求失败（网络错误）')),
+                                ontimeout: () => reject(new Error('GM 请求超时')),
+                            });
+                        } catch (e) { reject(e); }
+                    });
+                }
+                return fetch(url, { method: 'POST', credentials: 'include', headers: hdrs, body: payload })
+                    .then((resp) => {
+                        if (!resp.ok) {
+                            return resp.text().then((t) => { throw new Error('HTTP ' + resp.status + '：' + String(t).slice(0, 160)); });
+                        }
+                        return resp.text();
+                    })
+                    .catch((e) => {
+                        const m = String((e && e.message) || e);
+                        if (/Failed to fetch|fetch failed|NetworkError|Load failed|CORS|blocked/i.test(m)) {
+                            throw new Error('请求被浏览器跨域策略拦截（' + m + '）。' +
+                                '解决方式：① 油猴脚本把头部 @grant none 改成 @grant GM_xmlhttpRequest 后重装，脚本会自动改用 GM 请求绕开跨域；' +
+                                '② 或改用「自定义接口」并配中转代理（npm run proxy）；③ 或使用外部题库。');
+                        }
+                        throw e;
+                    });
+            },
+
             async _askOfficialAI(question, options) {
                 const p = await this._getOfficialAiParams();
                 let content = '题目：' + question;
@@ -1542,18 +1608,8 @@
                     '&appId=1192651262850' +
                     '&courseid=' + encodeURIComponent(p.courseId) +
                     '&clazzid=' + encodeURIComponent(p.clazzId) + '&ut=s';
-                const resp = await fetch(url, {
-                    method: 'POST',
-                    credentials: 'include',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'Accept': '*/*',
-                        'Origin': 'https://stat2-ans.chaoxing.com',
-                    },
-                    body: JSON.stringify(body),
-                });
-                if (!resp.ok) throw new Error('官方 AI 返回 HTTP ' + resp.status);
-                const text = await resp.text();
+                // 官方 AI 接口位于 stat2-ans 域，与课程页不同源，需走跨域请求通道（GM 优先）
+                const text = await this._crossPost(url, body, { 'Accept': '*/*' });
 
                 // 流式响应：每行内以 $_$ 分段，取 type=coreAnswer 的内容拼接
                 let answer = '';
@@ -1649,16 +1705,9 @@
                 if (this.configs.aiApiKey) {
                     headers['Authorization'] = 'Bearer ' + this.configs.aiApiKey;
                 }
-                const resp = await fetch(this.configs.aiApiBase, {
-                    method: 'POST',
-                    headers: headers,
-                    body: JSON.stringify(body),
-                });
-                if (!resp.ok) {
-                    const txt = await resp.text().catch(() => '');
-                    throw new Error('AI 接口返回 ' + resp.status + '：' + txt.slice(0, 160));
-                }
-                const data = await resp.json().catch(() => null);
+                const respText = await this._crossPost(this.configs.aiApiBase, body, headers);
+                let data = null;
+                try { data = JSON.parse(respText); } catch (e) { data = null; }
                 let ans = data && data.choices && data.choices[0] && data.choices[0].message ? data.choices[0].message.content : '';
                 return (ans || '').trim();
             },
@@ -1762,16 +1811,24 @@
                 let list = [];
                 try {
                     list = doc.querySelectorAll('input[type=radio], input[type=checkbox], input[type=text], textarea, [contenteditable="true"], [contenteditable=""]');
-                } catch (e) {
+                } catch (err) {
                     return out;
                 }
                 list.forEach((el) => {
                     if (!el || el.disabled || el.readOnly) return;
                     if (el.type === 'hidden') return;
+                    // 排除脚本自身的控制面板：面板里也有 checkbox，绝不能被当成题目作答
+                    try {
+                        if (el.closest && el.closest('#xtControlPanel')) return;
+                    } catch (err2) { /* ignore */ }
+                    const isChoice = el.type === 'radio' || el.type === 'checkbox';
                     try {
                         const st = doc.defaultView && doc.defaultView.getComputedStyle ? doc.defaultView.getComputedStyle(el) : null;
-                        if (st && (st.display === 'none' || st.visibility === 'hidden')) return;
-                    } catch (e) { /* ignore */ }
+                        // 学习通常把 radio/checkbox 视觉隐藏、用自定义样式呈现（label 或 div 做外观），
+                        // 这类控件依然可以 click / 赋值，因此不能因不可见而跳过；
+                        // 文本框若被隐藏，多半是存放答案的隐藏域，应跳过。
+                        if (st && (st.display === 'none' || st.visibility === 'hidden') && !isChoice) return;
+                    } catch (err3) { /* ignore */ }
                     out.push(el);
                 });
                 return out;
@@ -2121,15 +2178,38 @@
             _diagnose() {
                 const docs = this._getQuestionDocuments();
                 console.log('%c======== [AI答题] DOM 诊断开始 ========', 'color:#673AB7;font-weight:bold');
-                console.log('文档数（主文档 + 同域 iframe）：' + docs.length);
+                console.log('origin：' + location.origin);
+                console.log('URL：' + location.href.slice(0, 140));
+                // 环境信息：用于判断「题目在 iframe 里」还是「选项不是标准控件」
+                let iframes = [];
+                try {
+                    document.querySelectorAll('iframe').forEach((f) => {
+                        let same = false;
+                        try {
+                            same = !!(f.contentDocument && f.contentDocument.location && f.contentDocument.location.hostname === location.hostname);
+                        } catch (err) { same = false; }
+                        iframes.push((f.src || '(无 src)').slice(0, 100) + '   [' + (same ? '同域可访问' : '跨域无法访问') + ']');
+                    });
+                } catch (err) { /* ignore */ }
+                console.log('iframe 数量：' + iframes.length);
+                iframes.forEach((t) => console.log('   - ' + t));
+                const stat = {};
+                try {
+                    document.querySelectorAll('input').forEach((el) => {
+                        const k = el.type || 'text';
+                        stat[k] = (stat[k] || 0) + 1;
+                    });
+                } catch (err) { /* ignore */ }
+                console.log('主文档 input 统计：' + JSON.stringify(stat));
+                console.log('可作答文档数（主文档 + 同域 iframe）：' + docs.length);
                 docs.forEach((doc, di) => {
                     let ctrls = [];
                     let items = [];
                     try {
                         ctrls = this._collectAnswerControls(doc);
                         items = this._collectQuestionBlocks(doc);
-                    } catch (e) {
-                        console.warn('文档 #' + (di + 1) + ' 解析失败：' + e.message);
+                    } catch (err) {
+                        console.warn('文档 #' + (di + 1) + ' 解析失败：' + err.message);
                         return;
                     }
                     console.log('--- 文档 #' + (di + 1) + '：可作答控件 ' + ctrls.length + ' 个，识别题目 ' + items.length + ' 个 ---');
@@ -2155,7 +2235,7 @@
                                 console.log('      HTML: ' + (el.innerHTML || '').replace(/\s+/g, ' ').slice(0, 260));
                             });
                         }
-                    } catch (e) { /* ignore */ }
+                    } catch (err) { /* ignore */ }
                 });
                 console.log('%c======== 诊断结束（可截图此段反馈） ========', 'color:#673AB7;font-weight:bold');
                 return docs.length;
