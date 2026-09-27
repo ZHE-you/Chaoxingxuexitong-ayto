@@ -2,7 +2,7 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Node](https://img.shields.io/badge/node-%3E%3D20.11-brightgreen.svg)](https://nodejs.org)
-[![Version](https://img.shields.io/badge/version-3.4.0-orange.svg)](package.json)
+[![Version](https://img.shields.io/badge/version-3.4.1-orange.svg)](package.json)
 [![Build](https://github.com/ZHE-you/Chaoxingxuexitong-ayto/actions/workflows/verify.yml/badge.svg)](https://github.com/ZHE-you/Chaoxingxuexitong-ayto/actions/workflows/verify.yml)
 
 > ⚠️ **免责声明**：本项目仅用于脚本调试、前端自动化研究与页面行为分析，请遵守目标平台（学习通 / 超星）的使用规定，勿用于违规用途。因使用本脚本产生的任何后果由使用者自行承担。
@@ -74,10 +74,12 @@ app.nextUnit();   // 手动切换到下一小节
 - **下一节**：手动切换到下一个视频 / 章节。
 - **重新运行**：重置状态并重新初始化（相当于刷新页面后重来）。
 - **停止**：彻底停止脚本监控并暂停视频。
-- **开关**：`自动播放`、`无视频自动跳过` 两个勾选项，改动后即时生效并保存。
+- **开关**：`自动播放`、`无视频自动跳过`、`静音播放` 三个勾选项，改动后即时生效并保存。
 - 面板顶部蓝条可**拖动**改变位置，右上角 `—` 可**收起 / 展开**。
 
-> 倍速、自动播放、无视频跳过三项配置会通过 `localStorage` 在本机保存，下次打开同一站点时自动恢复。
+> `静音播放` 开启后，所有视频（包括自动播放、保活续播、暂停后继续）都会静音，勾选可**立即**应用到正在播放的视频；关闭则恢复声音。
+>
+> 倍速、自动播放、无视频跳过、静音四项配置会通过 `localStorage` 在本机保存，下次打开同一站点时自动恢复。
 >
 > 若不想看到面板，可在控制台执行 `app.destroy()` 移除它（同时停止脚本）。
 
@@ -95,6 +97,7 @@ app.nextUnit();   // 手动切换到下一小节
 | `guardNoProgressMs` | `7000` | 判定“卡住无进度”的阈值（毫秒） |
 | `guardResumeCooldownMs` | `1500` | 恢复播放的冷却时间（毫秒） |
 | `autoAdvanceNoVideo` | `false` | 是否在无视频小节自动切换（默认关闭，安全起见） |
+| `muted` | `false` | 是否静音播放（控制台「静音播放」开关对应此值） |
 
 将 `autoAdvanceNoVideo` 改为 `true` 可让脚本自动跳过无视频小节（请先确认课程结构安全）。
 

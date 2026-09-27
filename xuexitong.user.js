@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         学习通自动刷课脚本
 // @namespace    https://github.com/ZHE-you/Chaoxingxuexitong-ayto
-// @version      3.4.0
+// @version      3.4.1
 // @description  自动播放、自动切换下一节，并在页面结构异常时安全停止。单文件：可直接粘贴到浏览器控制台，也可导入 Tampermonkey。
 // @author       夏至子 (ZHE-you)
 // @homepageURL  https://github.com/ZHE-you/Chaoxingxuexitong-ayto
@@ -78,6 +78,7 @@
                 guardNoProgressMs: 7000,
                 guardResumeCooldownMs: 1500,
                 autoAdvanceNoVideo: false,
+                muted: false,
             },
             _videoEl: null,
             _treeContainerEl: null,
@@ -262,6 +263,7 @@
                     this._isPlaying = true;
                     this._videoEventHandle();
                     el.playbackRate = this.configs.playbackRate;
+                    el.muted = this.configs.muted;
 
                     try {
                         await el.play();
@@ -605,6 +607,7 @@
                         playbackRate: ['xtCfg_playbackRate', (v) => parseFloat(v)],
                         autoplay: ['xtCfg_autoplay', (v) => v === '1'],
                         autoAdvanceNoVideo: ['xtCfg_autoAdvanceNoVideo', (v) => v === '1'],
+                        muted: ['xtCfg_muted', (v) => v === '1'],
                     };
                     for (const key in map) {
                         const [k, parse] = map[key];
@@ -619,7 +622,7 @@
             },
             _saveConfig(key, value) {
                 try {
-                    const store = { playbackRate: 'xtCfg_playbackRate', autoplay: 'xtCfg_autoplay', autoAdvanceNoVideo: 'xtCfg_autoAdvanceNoVideo' };
+                    const store = { playbackRate: 'xtCfg_playbackRate', autoplay: 'xtCfg_autoplay', autoAdvanceNoVideo: 'xtCfg_autoAdvanceNoVideo', muted: 'xtCfg_muted' };
                     localStorage.setItem(store[key], String(value));
                 } catch (e) {}
             },
@@ -637,6 +640,7 @@
                 const v = this._getVideoEl();
                 if (v) {
                     v.playbackRate = this.configs.playbackRate;
+                    v.muted = this.configs.muted;
                     v.play().then(() => {
                         this._isPlaying = true;
                         this._startVideoMonitoring();
@@ -694,7 +698,8 @@
                         '<div class="xt-row xt-btns"><button id="xtPlay" class="xt-btn xt-primary">开始</button><button id="xtPause" class="xt-btn">暂停</button><button id="xtNext" class="xt-btn">下一节</button></div>' +
                         '<div class="xt-row xt-btns"><button id="xtRerun" class="xt-btn">重新运行</button><button id="xtStop" class="xt-btn xt-danger">停止</button></div>' +
                         '<div class="xt-row xt-checks"><label><input type="checkbox" id="xtAutoplay"> 自动播放</label><label><input type="checkbox" id="xtSkipNoVideo"> 无视频跳过</label></div>' +
-                        '<div class="xt-tip">倍速即时生效；暂停后不再自动续播。配置自动保存。</div>' +
+                        '<div class="xt-row xt-checks"><label><input type="checkbox" id="xtMuted"> 静音播放</label></div>' +
+                        '<div class="xt-tip">倍速/静音即时生效；暂停后不再自动续播。配置自动保存。</div>' +
                     '</div>';
                 document.body.appendChild(panel);
 
@@ -705,11 +710,13 @@
                 const infoEl = byId('xtInfo');
                 const autoplayCb = byId('xtAutoplay');
                 const skipCb = byId('xtSkipNoVideo');
+                const muteCb = byId('xtMuted');
 
                 speed.value = this.configs.playbackRate;
                 speedVal.textContent = this.configs.playbackRate;
                 autoplayCb.checked = !!this.configs.autoplay;
                 skipCb.checked = !!this.configs.autoAdvanceNoVideo;
+                muteCb.checked = !!this.configs.muted;
 
                 speed.addEventListener('input', () => {
                     const v = parseFloat(speed.value);
@@ -727,6 +734,12 @@
                 skipCb.addEventListener('change', () => {
                     this.configs.autoAdvanceNoVideo = skipCb.checked;
                     this._saveConfig('autoAdvanceNoVideo', skipCb.checked ? '1' : '0');
+                });
+                muteCb.addEventListener('change', () => {
+                    this.configs.muted = muteCb.checked;
+                    this._saveConfig('muted', muteCb.checked ? '1' : '0');
+                    const video = this._getVideoEl();
+                    if (video) video.muted = muteCb.checked;
                 });
                 byId('xtPlay').addEventListener('click', () => {
                     if (!this._started) this.run(); else this.resume();
