@@ -1,0 +1,25 @@
+name: Verify
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Build userscript
+        run: node scripts/build-userscript.mjs
+
+      - name: Verify source and userscript
+        run: node tests/verify-v3.mjs
