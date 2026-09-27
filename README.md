@@ -128,4 +128,4 @@ CI（`.github/workflows/verify.yml`）在每次 push / PR 时自动执行该校�
 
 ## 📄 许可证
 
-[MIT](LICENSE) © 2026 xuexitongScript contributors
+[MIT](LICENSE) © 2026 夏至子 ([ZHE-you](https://github.com/ZHE-you))
