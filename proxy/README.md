@@ -13,6 +13,18 @@
 
 零第三方依赖，Node 20+ 自带 `fetch` 即可运行。
 
+**推荐用法 —— 用 `.env` 存密钥，一条命令搞定：**
+
+```bash
+cp .env.example .env                 # 复制模板（本目录内操作）
+# 编辑 .env，填入 UPSTREAM_KEY=sk-你的密钥
+node local-proxy.mjs                 # 或回到仓库根目录执行 npm run proxy
+```
+
+这样脚本面板只需填 API 地址，**Key 留空**即可，真实密钥不会进入浏览器。
+
+**或者用环境变量临时启动：**
+
 ```bash
 # 在仓库根目录执行
 UPSTREAM_KEY=sk-你的密钥 npm run proxy
@@ -26,8 +38,16 @@ UPSTREAM_KEY=sk-你的密钥 node proxy/local-proxy.mjs
 | 项目 | 值 |
 |---|---|
 | API 地址 | `http://127.0.0.1:8787/v1/chat/completions` |
-| API Key | 你的真实密钥（若设了 `PROXY_TOKEN` 则填该口令） |
+| API Key | **留空**（密钥已在代理端）或填 `PROXY_TOKEN` 的值 |
 | 模型名 | `deepseek-chat` |
+
+**`.env` 文件查找顺序**（已存在的环境变量优先级更高，方便临时覆盖）：
+
+1. 当前工作目录 `./.env`
+2. 本脚本同目录 `proxy/.env`
+3. 用户主目录 `~/.xuexitong-proxy.env`
+
+> 根目录 `.gitignore` 已排除 `.env` / `.env.*`，不会误提交。
 
 **环境变量**
 
@@ -38,8 +58,12 @@ UPSTREAM_KEY=sk-你的密钥 node proxy/local-proxy.mjs
 | `PROXY_TOKEN` | 空 | 访问口令，设了之后脚本的 Key 栏必须填它 |
 | `PORT` | `8787` | 监听端口 |
 
-> Windows PowerShell 设置环境变量写法：
+以上变量既可写在 `.env` 文件里，也可用环境变量临时覆盖（环境变量优先级更高）。
+
+> Windows PowerShell 临时设置写法：
 > `$env:UPSTREAM_KEY="sk-xxx"; npm run proxy`
+>
+> （长期使用请写进 `.env`，避免密钥出现在命令行历史里）
 
 > ⚠️ 代理默认只监听 `127.0.0.1`，不要改成 `0.0.0.0` 暴露到公网，除非同时设置了 `PROXY_TOKEN`。
 

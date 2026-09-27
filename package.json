@@ -1,6 +1,6 @@
 {
   "name": "xuexitong-autostudy-script",
-  "version": "3.4.2",
+  "version": "3.4.3",
   "description": "学习通自动刷课脚本 V3 稳定版：自动播放视频、自动切换下一小节，并在页面结构异常时安全停止。",
   "type": "module",
   "repository": {

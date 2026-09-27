@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         学习通自动刷课脚本
 // @namespace    https://github.com/ZHE-you/Chaoxingxuexitong-ayto
-// @version      3.4.2
+// @version      3.4.3
 // @description  自动播放、自动切换下一节，并在页面结构异常时安全停止。单文件：可直接粘贴到浏览器控制台，也可导入 Tampermonkey。
 // @author       夏至子 (ZHE-you)
 // @homepageURL  https://github.com/ZHE-you/Chaoxingxuexitong-ayto
@@ -729,9 +729,10 @@
                         '<div class="xt-ai-stat" id="xtAiStat">已答 0 · 失败 0</div>' +
                         '<div class="xt-row xt-btns"><button id="xtAiScan" class="xt-btn">立即扫描</button><button id="xtAiImport" class="xt-btn">导入题库</button><button id="xtAiExport" class="xt-btn">导出题库</button></div>' +
                         '<details class="xt-ai-adv"><summary>API 设置（需中转代理）</summary>' +
-                        '<input type="text" id="xtAiBase" class="xt-inp" placeholder="API 地址">' +
-                        '<input type="text" id="xtAiKey" class="xt-inp" placeholder="API Key">' +
+                        '<input type="text" id="xtAiBase" class="xt-inp" placeholder="API 地址（如 http://127.0.0.1:8787/v1/chat/completions）">' +
+                        '<input type="password" id="xtAiKey" class="xt-inp" placeholder="API Key（留空则由代理注入，推荐）">' +
                         '<input type="text" id="xtAiModel" class="xt-inp" placeholder="模型名(默认 deepseek-chat)">' +
+                        '<div class="xt-tip">🔒 推荐把真实密钥写在代理的环境变量 / .env 里，此处留空即可——这样密钥不会存在浏览器中。</div>' +
                         '</details>' +
                         '</div></details>' +
                         '<div class="xt-tip">倍速/静音即时生效；暂停后不再自动续播。配置自动保存。</div>' +
@@ -925,7 +926,7 @@
             },
 
             async _askAI(question, options) {
-                if (!this.configs.aiApiKey) throw new Error('未配置 API Key（请在控制台面板 API 设置中填写）');
+                if (!this.configs.aiApiBase) throw new Error('未配置 API 地址（请填写中转代理地址，见 proxy/README.md）');
                 const sys = '你是学习通答题助手。只根据题目给出最简洁的答案：单选题/判断题直接给正确选项字母或内容；多选题给出所有正确选项；填空题给出应填的词或短语；问答题给出简短要点。不要解释、不要序号、不要多余文字。';
                 let user = '题目：' + question;
                 if (options && options.length) user += '\n选项：' + options.join(' ／ ');
@@ -937,12 +938,16 @@
                     ],
                     temperature: 0.2,
                 };
+                // 注意：API Key 可以留空。
+                // 推荐做法是把真实密钥写在中转代理的环境变量/.env 里，此处留空，
+                // 浏览器 localStorage 中就不存任何密钥；代理收到请求后再注入真实密钥。
+                const headers = { 'Content-Type': 'application/json' };
+                if (this.configs.aiApiKey) {
+                    headers['Authorization'] = 'Bearer ' + this.configs.aiApiKey;
+                }
                 const resp = await fetch(this.configs.aiApiBase, {
                     method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'Authorization': 'Bearer ' + this.configs.aiApiKey,
-                    },
+                    headers: headers,
                     body: JSON.stringify(body),
                 });
                 if (!resp.ok) {
@@ -1034,8 +1039,9 @@
 
                 const answer = this._lookupBank(text);
                 if (!answer) {
-                    if (!this.configs.aiApiKey) {
-                        console.warn('%c[AI答题] 题库未命中且未配置 API Key，跳过：' + fp, 'color:#FF9800');
+                    // 只校验 API 地址：Key 允许为空（由中转代理注入真实密钥，推荐）
+                    if (!this.configs.aiApiBase) {
+                        console.warn('%c[AI答题] 题库未命中且未配置 API 地址，跳过：' + fp, 'color:#FF9800');
                         return false;
                     }
                     const optTexts = opts.filter(o => !o.isInput).map(o => o.text);

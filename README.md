@@ -2,7 +2,7 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Node](https://img.shields.io/badge/node-%3E%3D20.11-brightgreen.svg)](https://nodejs.org)
-[![Version](https://img.shields.io/badge/version-3.4.2-orange.svg)](package.json)
+[![Version](https://img.shields.io/badge/version-3.4.3-orange.svg)](package.json)
 [![Build](https://github.com/ZHE-you/Chaoxingxuexitong-ayto/actions/workflows/verify.yml/badge.svg)](https://github.com/ZHE-you/Chaoxingxuexitong-ayto/actions/workflows/verify.yml)
 
 > ⚠️ **免责声明**：本项目仅用于脚本调试、前端自动化研究与页面行为分析，请遵守目标平台（学习通 / 超星）的使用规定，勿用于违规用途。因使用本脚本产生的任何后果由使用者自行承担。
@@ -109,7 +109,7 @@ UPSTREAM_KEY=sk-你的密钥 npm run proxy
 | 项目 | 值 |
 |---|---|
 | API 地址 | `http://127.0.0.1:8787/v1/chat/completions` |
-| API Key | 你的真实密钥（若设了 `PROXY_TOKEN` 则填该口令） |
+| API Key | **建议留空**（密钥写在 `.env` 里，详见下方密钥章节） |
 | 模型名 | `deepseek-chat` |
 
 想多设备 / 长期在线用，改用 Cloudflare Worker 版（免费额度足够，Key 存云端）：
@@ -125,8 +125,60 @@ npx wrangler deploy
 
 - **API 设置**项说明：
   - **API 地址**：OpenAI 兼容的 `/v1/chat/completions` 端点，即上面代理的地址。
-  - **API Key**：你的密钥（明文存于本机 `localStorage`，仅本机使用，公共电脑慎用）。
+  - **API Key**：**建议留空**（见下方「密钥怎么填」）。留空后由代理注入真实密钥，浏览器里不存任何密钥。
   - **模型名**：如 `deepseek-chat`（默认）。
+
+## 🔑 密钥怎么填（三种方式，按安全程度排序）
+
+> ⚠️ **先说风险**：脚本里填的 Key 会以**明文**存在浏览器的 `localStorage`。同一页面上运行的任何脚本、第三方浏览器扩展、以及能接触这台电脑的人都能读到它。**不要在学校机房 / 公用电脑上使用方式三。**
+
+| 方式 | 安全 | 浏览器里存的是什么 | 适用场景 |
+| --- | --- | --- | --- |
+| **① 密钥只存在代理端**（⭐ 推荐） | 最高 | **什么都不存** | 只在本机用 |
+| **② 代理存真 Key + 浏览器存口令** | 高 | 仅一个可随时作废的口令 | 多人 / 多设备共用一个代理 |
+| **③ 直接填真实密钥** | 低 | 真实密钥明文 | 临时测试，用完即删 |
+
+### 方式 ①：密钥只存在代理端（推荐）
+
+把真实密钥写进配置文件，脚本面板的 Key **留空**：
+
+```bash
+cp proxy/.env.example proxy/.env      # 复制模板
+# 编辑 proxy/.env，填入 UPSTREAM_KEY=sk-你的密钥
+node proxy/local-proxy.mjs            # 直接启动，无需再敲环境变量
+```
+
+`.env` 查找顺序：`当前目录/.env` → `proxy/.env` → `~/.xuexitong-proxy.env`（已存在的环境变量优先，方便临时覆盖）。
+
+此时脚本面板只需填 **API 地址**，Key **留空**即可 —— 代理收到请求后会自己加上真实密钥再转发。
+
+> 根目录 `.gitignore` 已排除 `.env` / `.env.*`（但保留 `.env.example`），不会被误提交。
+
+### 方式 ②：代理存真 Key，浏览器只填口令
+
+在 `proxy/.env` 里同时写：
+
+```ini
+UPSTREAM_KEY=sk-你的真实密钥
+PROXY_TOKEN=一串随机字符串        # 例如 openssl rand -hex 16 生成
+```
+
+脚本面板「API Key」填**那个随机字符串**。这样即使口令泄露，真实 Key 仍在代理端；换一个 `PROXY_TOKEN` 就能立即作废访问权限。
+
+### 方式 ③：直接填真实密钥（临时用）
+
+面板 Key 栏直接填 `sk-...`，用完记得清空：
+
+```javascript
+// 在控制台执行，彻底清除已存的密钥
+app.configs.aiApiKey = ''; localStorage.removeItem('xtAi_apiKey');
+```
+
+### 🔒 无论用哪种方式都建议做
+
+1. 在上游控制台给这个密钥设一个**较低的月度额度上限**，防止意外消耗
+2. **不要**把密钥写进任何会被 git 提交的文件（`wrangler.toml` 的 vars、`*.js` 源码里）
+3. 若曾经把密钥提交到 GitHub → 立即到上游控制台**吊销该密钥**（改代码救不回来，Git 历史仍在）
 - **手动触发**：点「立即扫描」可立刻扫一轮（调试用）。
 - **题型支持**：单选 / 判断 / 多选（自动点选选项）、填空 / 问答（填入文本）。匹配失败时控制台会打印题目与答案，便于手动修正后加入题库。
 - **范围限定**：本功能**只处理视频中途题与章节小测验**，不触碰作业与考试，规避风险。
