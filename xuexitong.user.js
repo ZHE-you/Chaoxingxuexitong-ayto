@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         学习通自动刷课脚本
 // @namespace    https://github.com/ZHE-you/Chaoxingxuexitong-ayto
-// @version      3.4.3
+// @version      3.5.0
 // @description  自动播放、自动切换下一节，并在页面结构异常时安全停止。单文件：可直接粘贴到浏览器控制台，也可导入 Tampermonkey。
 // @author       夏至子 (ZHE-you)
 // @homepageURL  https://github.com/ZHE-you/Chaoxingxuexitong-ayto
@@ -48,6 +48,111 @@
         waitForCoursePage();
     }
 
+    // ==================== 工具：MD5（用于计算学时上报的 enc 签名） ====================
+    // 学习通「提交学时」接口要求一个 md5 签名，浏览器里没有内置，这里自带一个精简实现。
+    function md5hex(str) {
+        function safeAdd(x, y) {
+            const lsw = (x & 0xffff) + (y & 0xffff);
+            const msw = (x >> 16) + (y >> 16) + (lsw >> 16);
+            return (msw << 16) | (lsw & 0xffff);
+        }
+        function rol(num, cnt) { return (num << cnt) | (num >>> (32 - cnt)); }
+        function cmn(q, a, b, x, s, t) { return safeAdd(rol(safeAdd(safeAdd(a, q), safeAdd(x, t)), s), b); }
+        function ff(a, b, c, d, x, s, t) { return cmn((b & c) | (~b & d), a, b, x, s, t); }
+        function gg(a, b, c, d, x, s, t) { return cmn((b & d) | (c & ~d), a, b, x, s, t); }
+        function hh(a, b, c, d, x, s, t) { return cmn(b ^ c ^ d, a, b, x, s, t); }
+        function ii(a, b, c, d, x, s, t) { return cmn(c ^ (b | ~d), a, b, x, s, t); }
+
+        const input = unescape(encodeURIComponent(str));
+        let len = input.length;
+        const words = [];
+        for (let i = 0; i < len; i++) words[i >> 2] |= (input.charCodeAt(i) & 0xff) << ((i % 4) * 8);
+        words[len >> 2] |= 0x80 << ((len % 4) * 8);
+        words[(((len + 8) >> 6) + 1) * 16 - 2] = len * 8;
+
+        let a = 1732584193, b = -271733879, c = -1732584194, d = 271733878;
+        for (let i = 0; i < words.length; i += 16) {
+            const oa = a, ob = b, oc = c, od = d;
+            a = ff(a, b, c, d, words[i + 0], 7, -680876936);
+            d = ff(d, a, b, c, words[i + 1], 12, -389564586);
+            c = ff(c, d, a, b, words[i + 2], 17, 606105819);
+            b = ff(b, c, d, a, words[i + 3], 22, -1044525330);
+            a = ff(a, b, c, d, words[i + 4], 7, -176418897);
+            d = ff(d, a, b, c, words[i + 5], 12, 1200080426);
+            c = ff(c, d, a, b, words[i + 6], 17, -1473231341);
+            b = ff(b, c, d, a, words[i + 7], 22, -45705983);
+            a = ff(a, b, c, d, words[i + 8], 7, 1770035416);
+            d = ff(d, a, b, c, words[i + 9], 12, -1958414417);
+            c = ff(c, d, a, b, words[i + 10], 17, -42063);
+            b = ff(b, c, d, a, words[i + 11], 22, -1990404162);
+            a = ff(a, b, c, d, words[i + 12], 7, 1804603682);
+            d = ff(d, a, b, c, words[i + 13], 12, -40341101);
+            c = ff(c, d, a, b, words[i + 14], 17, -1502002290);
+            b = ff(b, c, d, a, words[i + 15], 22, 1236535329);
+
+            a = gg(a, b, c, d, words[i + 1], 5, -165796510);
+            d = gg(d, a, b, c, words[i + 6], 9, -1069501632);
+            c = gg(c, d, a, b, words[i + 11], 14, 643717713);
+            b = gg(b, c, d, a, words[i + 0], 20, -373897302);
+            a = gg(a, b, c, d, words[i + 5], 5, -701558691);
+            d = gg(d, a, b, c, words[i + 10], 9, 38016083);
+            c = gg(c, d, a, b, words[i + 15], 14, -660478335);
+            b = gg(b, c, d, a, words[i + 4], 20, -405537848);
+            a = gg(a, b, c, d, words[i + 9], 5, 568446438);
+            d = gg(d, a, b, c, words[i + 14], 9, -1019803690);
+            c = gg(c, d, a, b, words[i + 3], 14, -187363961);
+            b = gg(b, c, d, a, words[i + 8], 20, 1163531501);
+            a = gg(a, b, c, d, words[i + 13], 5, -1444681467);
+            d = gg(d, a, b, c, words[i + 2], 9, -51403784);
+            c = gg(c, d, a, b, words[i + 7], 14, 1735328473);
+            b = gg(b, c, d, a, words[i + 12], 20, -1926607734);
+
+            a = hh(a, b, c, d, words[i + 5], 4, -378558);
+            d = hh(d, a, b, c, words[i + 8], 11, -2022574463);
+            c = hh(c, d, a, b, words[i + 11], 16, 1839030562);
+            b = hh(b, c, d, a, words[i + 14], 23, -35309556);
+            a = hh(a, b, c, d, words[i + 1], 4, -1530992060);
+            d = hh(d, a, b, c, words[i + 4], 11, 1272893353);
+            c = hh(c, d, a, b, words[i + 7], 16, -155497632);
+            b = hh(b, c, d, a, words[i + 10], 23, -1094730640);
+            a = hh(a, b, c, d, words[i + 13], 4, 681279174);
+            d = hh(d, a, b, c, words[i + 0], 11, -358537222);
+            c = hh(c, d, a, b, words[i + 3], 16, -722521979);
+            b = hh(b, c, d, a, words[i + 6], 23, 76029189);
+            a = hh(a, b, c, d, words[i + 9], 4, -640364487);
+            d = hh(d, a, b, c, words[i + 12], 11, -421815835);
+            c = hh(c, d, a, b, words[i + 15], 16, 530742520);
+            b = hh(b, c, d, a, words[i + 2], 23, -995338651);
+
+            a = ii(a, b, c, d, words[i + 0], 6, -198630844);
+            d = ii(d, a, b, c, words[i + 7], 10, 1126891415);
+            c = ii(c, d, a, b, words[i + 14], 15, -1416354905);
+            b = ii(b, c, d, a, words[i + 5], 21, -57434055);
+            a = ii(a, b, c, d, words[i + 12], 6, 1700485571);
+            d = ii(d, a, b, c, words[i + 3], 10, -1894986606);
+            c = ii(c, d, a, b, words[i + 10], 15, -1051523);
+            b = ii(b, c, d, a, words[i + 1], 21, -2054922799);
+            a = ii(a, b, c, d, words[i + 8], 6, 1873313359);
+            d = ii(d, a, b, c, words[i + 15], 10, -30611744);
+            c = ii(c, d, a, b, words[i + 6], 15, -1560198380);
+            b = ii(b, c, d, a, words[i + 13], 21, 1309151649);
+            a = ii(a, b, c, d, words[i + 4], 6, -145523070);
+            d = ii(d, a, b, c, words[i + 11], 10, -1120210379);
+            c = ii(c, d, a, b, words[i + 2], 15, 718787259);
+            b = ii(b, c, d, a, words[i + 9], 21, -343485551);
+
+            a = safeAdd(a, oa); b = safeAdd(b, ob); c = safeAdd(c, oc); d = safeAdd(d, od);
+        }
+        function hex(n) {
+            let s = '';
+            for (let j = 0; j < 4; j++) s += ('0' + ((n >> (j * 8)) & 0xff).toString(16)).slice(-2);
+            return s;
+        }
+        return hex(a) + hex(b) + hex(c) + hex(d);
+    }
+
+    const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
     function waitForCoursePage() {
         let attempts = 0;
         const maxAttempts = 20;
@@ -80,9 +185,17 @@
                 autoAdvanceNoVideo: false,
                 muted: false,
                 aiEnabled: false,
+                // aiSource: 'official' = 学习通自带 AI（免费、零配置）
+                //           'custom'   = 自定义 OpenAI 兼容接口（需中转代理）
+                //           'auto'     = 先官方 AI，失败自动回落自定义接口
+                aiSource: 'official',
                 aiApiBase: 'https://api.deepseek.com/v1/chat/completions',
                 aiApiKey: '',
                 aiModel: 'deepseek-chat',
+                // 快速模式：直接向学习通「提交学时」接口上报进度，不必真实播放视频
+                fastVideo: false,
+                vtStepSec: 58,      // 每次上报推进的秒数
+                vtLoopMax: 400,     // 单个视频最多上报轮数，防止死循环
             },
             _videoEl: null,
             _treeContainerEl: null,
@@ -555,6 +668,16 @@
             },
             _handleVideoLoaded(e) {
                 console.log(`%c============视频加载完成=============`, "color:#2196F3");
+                // 快速模式：不真实播放，改为直接向学时接口上报进度；失败则自动回退普通播放
+                if (this.configs.fastVideo && !this._fastRunning) {
+                    this._fastRunCurrentVideo().then((ok) => {
+                        if (!ok && this.configs.autoplay && !this._isPlaying && !this._userPaused) {
+                            console.log('%c[快速模式] 未能接管，改由普通播放继续', 'color:#FF9800');
+                            this.play();
+                        }
+                    });
+                    return;
+                }
                 if (this.configs.autoplay && !this._isPlaying && !this._userPaused) {
                     this.play();
                 }
@@ -623,6 +746,8 @@
                         aiApiBase: ['xtAi_apiBase', (v) => v],
                         aiApiKey: ['xtAi_apiKey', (v) => v],
                         aiModel: ['xtAi_model', (v) => v],
+                        aiSource: ['xtAi_source', (v) => v],
+                        fastVideo: ['xtAi_fastVideo', (v) => v === '1'],
                     };
                     for (const key in map) {
                         const [k, parse] = map[key];
@@ -637,7 +762,7 @@
             },
             _saveConfig(key, value) {
                 try {
-                    const store = { playbackRate: 'xtCfg_playbackRate', autoplay: 'xtCfg_autoplay', autoAdvanceNoVideo: 'xtCfg_autoAdvanceNoVideo', muted: 'xtCfg_muted', aiEnabled: 'xtAi_enabled', aiApiBase: 'xtAi_apiBase', aiApiKey: 'xtAi_apiKey', aiModel: 'xtAi_model' };
+                    const store = { playbackRate: 'xtCfg_playbackRate', autoplay: 'xtCfg_autoplay', autoAdvanceNoVideo: 'xtCfg_autoAdvanceNoVideo', muted: 'xtCfg_muted', aiEnabled: 'xtAi_enabled', aiApiBase: 'xtAi_apiBase', aiApiKey: 'xtAi_apiKey', aiModel: 'xtAi_model', aiSource: 'xtAi_source', fastVideo: 'xtAi_fastVideo' };
                     localStorage.setItem(store[key], String(value));
                 } catch (e) {}
             },
@@ -706,6 +831,8 @@
 #xtControlPanel .xt-ai-body .xt-btn{margin-bottom:5px;}
 #xtControlPanel details.xt-ai-adv{margin-top:4px;}
 #xtControlPanel details.xt-ai-adv>summary{cursor:pointer;font-size:11px;color:#666;outline:none;}
+#xtControlPanel .xt-sel{width:100%;box-sizing:border-box;margin:3px 0;padding:4px 6px;border:1px solid #d0d7de;border-radius:4px;font-size:11px;background:#fff;color:#24292f;outline:none;}
+#xtControlPanel details.xt-ai-adv .xt-sel{margin-top:2px;}
 `;
                 const style = document.createElement('style');
                 style.textContent = css;
@@ -727,8 +854,25 @@
                         '<div class="xt-ai-body">' +
                         '<label class="xt-ai-en"><input type="checkbox" id="xtAiEnable"> 启用自动答题</label>' +
                         '<div class="xt-ai-stat" id="xtAiStat">已答 0 · 失败 0</div>' +
+                        '<select id="xtAiSource" class="xt-sel">' +
+                        '<option value="official">🆓 官方 AI（免费零配置）</option>' +
+                        '<option value="custom">🔧 自定义接口（需代理）</option>' +
+                        '<option value="auto">🔄 自动（官方优先+回落）</option>' +
+                        '</select>' +
                         '<div class="xt-row xt-btns"><button id="xtAiScan" class="xt-btn">立即扫描</button><button id="xtAiImport" class="xt-btn">导入题库</button><button id="xtAiExport" class="xt-btn">导出题库</button></div>' +
-                        '<details class="xt-ai-adv"><summary>API 设置（需中转代理）</summary>' +
+                        '<details class="xt-ai-adv"><summary>⚡ 快速模式 / API 设置</summary>' +
+                        '<label class="xt-ai-en"><input type="checkbox" id="xtFastVideo"> ⚡ 快速学时上报（免真实播放）</label>' +
+                        '<select id="xtAiPreset" class="xt-sel">' +
+                        '<option value="">— 服务商快速填充 —</option>' +
+                        '<option value="deepseek">DeepSeek</option>' +
+                        '<option value="qwen">通义千问</option>' +
+                        '<option value="doubao">豆包（火山引擎）</option>' +
+                        '<option value="zhipu">智谱 GLM</option>' +
+                        '<option value="xinghuo">讯飞星火</option>' +
+                        '<option value="siliconflow">硅基流动</option>' +
+                        '<option value="openai">OpenAI</option>' +
+                        '<option value="local">本地代理 npm run proxy</option>' +
+                        '</select>' +
                         '<input type="text" id="xtAiBase" class="xt-inp" placeholder="API 地址（如 http://127.0.0.1:8787/v1/chat/completions）">' +
                         '<input type="password" id="xtAiKey" class="xt-inp" placeholder="API Key（留空则由代理注入，推荐）">' +
                         '<input type="text" id="xtAiModel" class="xt-inp" placeholder="模型名(默认 deepseek-chat)">' +
@@ -756,13 +900,50 @@
 
                 const aiEnableCb = byId('xtAiEnable');
                 const aiStatEl = byId('xtAiStat');
+                const aiSource = byId('xtAiSource');
+                const aiPreset = byId('xtAiPreset');
                 const aiBase = byId('xtAiBase');
                 const aiKey = byId('xtAiKey');
                 const aiModel = byId('xtAiModel');
+                const fastVideoCb = byId('xtFastVideo');
                 aiEnableCb.checked = !!this.configs.aiEnabled;
+                aiSource.value = this.configs.aiSource || 'official';
+                fastVideoCb.checked = !!this.configs.fastVideo;
                 aiBase.value = this.configs.aiApiBase;
                 aiKey.value = this.configs.aiApiKey;
                 aiModel.value = this.configs.aiModel;
+
+                // 服务商预设：大部分官方 API 禁止浏览器跨域，标注 ⚠ 的必须走中转代理
+                const AI_PRESETS = {
+                    deepseek: { base: 'https://api.deepseek.com/v1/chat/completions', model: 'deepseek-chat' },
+                    qwen: { base: 'https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions', model: 'qwen-plus' },
+                    doubao: { base: 'https://ark.cn-beijing.volces.com/api/v3/chat/completions', model: 'doubao-pro-32k' },
+                    zhipu: { base: 'https://open.bigmodel.cn/api/paas/v4/chat/completions', model: 'glm-4-flash' },
+                    xinghuo: { base: 'https://spark-api-open.xf-yun.com/v1/chat/completions', model: 'generalv3.5' },
+                    siliconflow: { base: 'https://api.siliconflow.cn/v1/chat/completions', model: 'Qwen/Qwen2.5-7B-Instruct' },
+                    openai: { base: 'https://api.openai.com/v1/chat/completions', model: 'gpt-4o-mini' },
+                    local: { base: 'http://127.0.0.1:8787/v1/chat/completions', model: 'deepseek-chat' },
+                };
+                aiPreset.addEventListener('change', () => {
+                    const preset = AI_PRESETS[aiPreset.value];
+                    if (!preset) return;
+                    aiBase.value = preset.base;
+                    aiModel.value = preset.model;
+                    console.log('%c[AI答题] 已填充 ' + aiPreset.value + ' 预设。注意：官方接口通常禁止浏览器跨域，' +
+                        '建议改用 local 预设（npm run proxy）或自建中转代理。', 'color:#FF9800');
+                    saveAiCfg();
+                });
+                aiSource.addEventListener('change', () => {
+                    this.configs.aiSource = aiSource.value;
+                    this._saveConfig('aiSource', aiSource.value);
+                    console.log('%c[AI答题] 答案来源切换为：' + aiSource.selectedOptions[0].textContent.trim(), 'color:#2196F3');
+                });
+                fastVideoCb.addEventListener('change', () => {
+                    this.configs.fastVideo = fastVideoCb.checked;
+                    this._saveConfig('fastVideo', fastVideoCb.checked ? '1' : '0');
+                    console.log('%c[快速模式] 已' + (fastVideoCb.checked ? '启用' : '关闭') +
+                        '。启用后下一次视频加载时不真实播放，改为向学时接口直接上报进度。', 'color:#9C27B0');
+                });
                 aiEnableCb.addEventListener('change', () => {
                     this.configs.aiEnabled = aiEnableCb.checked;
                     this._saveConfig('aiEnabled', aiEnableCb.checked ? '1' : '0');
@@ -867,12 +1048,16 @@
                 const { stateEl, infoEl } = this._ui;
                 let state = '空闲';
                 if (this._userPaused) state = '已暂停';
+                else if (this._fastRunning) state = '⚡快速';
                 else if (this._isPlaying) state = '运行中';
                 stateEl.textContent = state;
                 const cd = this._cellData;
-                infoEl.textContent = '第' + (cd.currentCellIndex + 1) + '章 第' + (cd.currentNCellIndex + 1) + '节 · ' + (cd.currentVideoTitle || '—');
+                let info = '第' + (cd.currentCellIndex + 1) + '章 第' + (cd.currentNCellIndex + 1) + '节 · ' + (cd.currentVideoTitle || '—');
+                if (this._fastRunning && this._fastProgress) info += ' ⚡' + this._fastProgress;
+                infoEl.textContent = info;
                 if (this._ui.aiStatEl) {
-                    this._ui.aiStatEl.textContent = '已答 ' + this._aiStat.answered + ' · 失败 ' + this._aiStat.failed + (this._aiStat.lastResult ? ' · ' + this._aiStat.lastResult : '');
+                    const src = this._aiStat.lastSource ? ' · ' + this._aiStat.lastSource : '';
+                    this._ui.aiStatEl.textContent = '已答 ' + this._aiStat.answered + ' · 失败 ' + this._aiStat.failed + (this._aiStat.lastResult ? ' · ' + this._aiStat.lastResult : '') + src;
                 }
             },
             // ===== AI 答题模块（题库优先 + AI 兜底）=====
@@ -925,6 +1110,301 @@
                 }
             },
 
+            // ==================== 课程 / 视频参数提取 ====================
+            // 从当前页面 URL、iframe 地址与 cookie 中解析接口所需的各种 ID。
+            _getCourseIds() {
+                const res = { courseId: '', clazzId: '', cpi: '', knowledgeId: '', objectId: '', jobid: '', userId: '' };
+                try {
+                    const params = new URLSearchParams(location.search);
+                    res.courseId = params.get('courseId') || params.get('courseid') || '';
+                    res.clazzId = params.get('clazzId') || params.get('clazzid') || '';
+                    res.cpi = params.get('cpi') || '';
+                    res.knowledgeId = params.get('knowledgeId') || params.get('knowledgeid') || '';
+                } catch (e) { /* ignore */ }
+
+                document.querySelectorAll('iframe').forEach((f) => {
+                    try {
+                        const u = f.src || f.getAttribute('src') || '';
+                        if (!u) return;
+                        const m = u.match(/objectId=([^&]+)/i) || u.match(/[?&]k=([^&]+)/i);
+                        if (m && !res.objectId) res.objectId = decodeURIComponent(m[1]);
+                    } catch (e) { /* ignore */ }
+                });
+
+                const ck = document.cookie.match(/(?:^|;\s*)UID=([^;]*)/) || document.cookie.match(/(?:^|;\s*)_uid=([^;]*)/);
+                if (ck) res.userId = ck[1];
+                return res;
+            },
+
+            // 查询视频元数据（时长 / dtoken / rt 等），学时上报签名依赖这些数据
+            async _fetchVideoStatus(objectId, fid) {
+                const url = 'https://mooc1-api.chaoxing.com/ananas/status/' + objectId +
+                    '?k=' + encodeURIComponent(fid || '') + '&flag=normal&_dc=' + Date.now();
+                const resp = await fetch(url, { credentials: 'include', headers: { 'Accept': '*/*' } });
+                if (!resp.ok) throw new Error('获取视频状态失败：HTTP ' + resp.status);
+                const d = await resp.json().catch(() => null);
+                if (!d) throw new Error('视频状态解析失败');
+                return {
+                    duration: Number(d.duration || 0),
+                    dtoken: d.dtoken || '',
+                    rt: d.rt || 0.9,
+                    attDurationEnc: d.attDurationEnc || '',
+                    videoFaceCaptureEnc: (d.tracking && d.tracking.videoFaceCaptureEnc) || '',
+                    isPassed: !!d.isPassed,
+                    playTime: Number(d.playTime || 0),
+                };
+            },
+
+            // 计算学时上报的 enc 签名（算法参照学习通 Web 端实现）
+            _calcEnc(p, playingTime, duration) {
+                const clipTime = '0_' + duration;
+                const raw = '[' + p.clazzId + '][' + p.userId + '][' + p.jobid + '][' + p.objectId +
+                    '][' + playingTime * 1000 + '][d_yHJ!$pdA~5][' + duration * 1000 + '][' + clipTime + ']';
+                return md5hex(raw);
+            },
+
+            // 提交一次学时记录
+            async _submitStudyTime(p, playingTime, duration, isdrag, view) {
+                const enc = this._calcEnc(p, playingTime, duration);
+                const query = [
+                    'clazzId=' + encodeURIComponent(p.clazzId),
+                    'playingTime=' + playingTime,
+                    'duration=' + duration,
+                    'clipTime=0_' + duration,
+                    'objectId=' + encodeURIComponent(p.objectId),
+                    'otherInfo=otherInfo',
+                    'courseId=' + encodeURIComponent(p.courseId),
+                    'jobid=' + encodeURIComponent(p.jobid || ''),
+                    'userid=' + encodeURIComponent(p.userId),
+                    'isdrag=' + isdrag,
+                    'view=' + view,
+                    'enc=' + enc,
+                    'rt=' + p.rt,
+                    'videoFaceCaptureEnc=' + encodeURIComponent(p.videoFaceCaptureEnc || ''),
+                    'dtype=Video',
+                    '_t=' + Date.now(),
+                    'attDuration=' + duration,
+                    'attDurationEnc=' + encodeURIComponent(p.attDurationEnc || ''),
+                ].join('&');
+                const url = 'https://mooc1.chaoxing.com/mooc-ans/multimedia/log/a/' +
+                    p.cpi + '/' + p.dtoken + '?' + query;
+                const resp = await fetch(url, { method: 'GET', credentials: 'include', headers: { 'Accept': '*/*' } });
+                const text = await resp.text();
+                if (!resp.ok) throw new Error('学时上报 HTTP ' + resp.status);
+                return text;
+            },
+
+            // ==================== 快速模式：接口级学时上报 ====================
+            // 不必真实播放视频，直接按步进向服务端的学时接口上报进度直到 isPassed。
+            // 任何一步失败都会安全返回 false，由调用方回退到普通播放模式。
+            _fastRunning: false,
+            _fastProgress: '',
+            async _fastRunCurrentVideo() {
+                const ids = this._getCourseIds();
+                const missing = ['objectId', 'userId', 'cpi', 'clazzId', 'courseId'].filter((k) => !ids[k]);
+                if (missing.length) {
+                    console.warn('%c[快速模式] 缺少参数：' + missing.join(', ') + '，回退普通播放', 'color:#FF9800');
+                    return false;
+                }
+
+                let st;
+                try {
+                    st = await this._fetchVideoStatus(ids.objectId, ids.cpi);
+                } catch (e) {
+                    console.warn('%c[快速模式] 无法获取视频信息，回退普通播放：' + e.message, 'color:#FF9800');
+                    return false;
+                }
+                if (!st.duration) {
+                    console.warn('%c[快速模式] duration 为 0，回退普通播放', 'color:#FF9800');
+                    return false;
+                }
+
+                const p = {
+                    clazzId: ids.clazzId, courseId: ids.courseId, cpi: ids.cpi,
+                    userId: ids.userId, objectId: ids.objectId, jobid: ids.jobid || '',
+                    dtoken: st.dtoken, rt: st.rt || 0.9,
+                    attDurationEnc: st.attDurationEnc, videoFaceCaptureEnc: st.videoFaceCaptureEnc,
+                };
+
+                this._fastRunning = true;
+                // 暂停真实播放，避免与接口上报重复计时
+                try { if (this._videoEl) this._videoEl.pause(); } catch (e) { /* ignore */ }
+
+                let playingTime = st.playTime || 0;
+                let loops = 0;
+                let view = 'pc';
+                let done = st.isPassed;
+                const step = Math.max(5, Number(this.configs.vtStepSec) || 58);
+
+                while (loops < this.configs.vtLoopMax && !done) {
+                    if (this._userPaused) {
+                        console.log('%c[快速模式] 已暂停', 'color:#2196F3');
+                        this._fastRunning = false;
+                        return false;
+                    }
+                    let text = '';
+                    try {
+                        text = await this._submitStudyTime(p, playingTime, st.duration, 0, view);
+                    } catch (e) {
+                        if (/HTTP 403/.test(e.message) && view === 'pc') {
+                            console.log('%c[快速模式] 触发 403，切换手机端模式重试', 'color:#FF9800');
+                            view = 'json';
+                            loops++;
+                            await sleep(1500);
+                            continue;
+                        }
+                        console.warn('%c[快速模式] 上报失败，回退普通播放：' + e.message, 'color:#F44336');
+                        this._fastRunning = false;
+                        return false;
+                    }
+
+                    let isPassed = null;
+                    let outTimeMsg = '';
+                    try {
+                        const j = JSON.parse(text);
+                        isPassed = j.isPassed;
+                        outTimeMsg = j.OutTimeMsg || '';
+                    } catch (e) { /* 非 JSON 响应按未完成处理 */ }
+
+                    const percent = ((playingTime / st.duration) * 100).toFixed(1);
+                    this._fastProgress = '上报 ' + playingTime + '/' + st.duration + 's (' + percent + '%)';
+                    console.log('%c[快速模式] ' + this._fastProgress, 'color:#9C27B0');
+
+                    if (outTimeMsg === '观看时长超过阈值') { done = true; break; }
+                    if (isPassed === true && playingTime >= st.duration) { done = true; break; }
+
+                    playingTime = Math.min(st.duration, playingTime + step);
+                    loops++;
+                    // 保留短暂间隔降低风控概率；相比真实播放仍是数量级的提速
+                    await sleep(1500);
+                }
+
+                this._fastRunning = false;
+                if (done) {
+                    console.log('%c[快速模式] 本节学时已完成', 'color:#4CAF50;font-weight:bold');
+                    setTimeout(() => this.nextUnit(), 1200);
+                    return true;
+                }
+                console.warn('%c[快速模式] 达到最大轮数仍未完成，回退普通播放', 'color:#FF9800');
+                return false;
+            },
+
+            // ==================== 学习通官方内置 AI（免费、零配置） ====================
+            _officialAiParams: null,
+            _officialAiParamsTs: 0,
+
+            async _getOfficialAiParams() {
+                if (this._officialAiParams && Date.now() - this._officialAiParamsTs < 30 * 60 * 1000) {
+                    return this._officialAiParams;
+                }
+                const ids = this._getCourseIds();
+                if (!ids.courseId || !ids.clazzId) {
+                    throw new Error('未能解析 courseId / clazzId，无法使用官方 AI');
+                }
+                const url = 'https://stat2-ans.chaoxing.com/bot/index?fromWorkbench=true&upload=true' +
+                    '&clazzid=' + encodeURIComponent(ids.clazzId) +
+                    '&showToolbox=false&bgColorNone=true&app_id=1192651262850' +
+                    '&courseid=' + encodeURIComponent(ids.courseId) +
+                    '&cpi=' + encodeURIComponent(ids.cpi || '') +
+                    '&bot_id=7438777570621653018&ut=s';
+                const resp = await fetch(url, { credentials: 'include', headers: { 'Accept': 'text/html,*/*' } });
+                if (!resp.ok) throw new Error('官方 AI 初始化失败：HTTP ' + resp.status);
+                const html = await resp.text();
+
+                const pick = (id) => {
+                    const re1 = new RegExp('id=["\']' + id + '["\'][^>]*value=["\']([^"\']*)["\']');
+                    const re2 = new RegExp('value=["\']([^"\']*)["\'][^>]*id=["\']' + id + '["\']');
+                    const m = html.match(re1) || html.match(re2);
+                    return m ? m[1] : '';
+                };
+                const sm = html.match(/"studentName"\s*:\s*"([^"]+)"/);
+                const params = {
+                    cozeEnc: pick('cozeEnc'),
+                    userId: pick('userId'),
+                    courseId: pick('courseId') || ids.courseId,
+                    clazzId: pick('clazzId') || ids.clazzId,
+                    conversationId: pick('conversationId'),
+                    courseName: pick('courseName'),
+                    personId: pick('personId'),
+                    studentName: sm ? sm[1] : '',
+                };
+                if (!params.cozeEnc || !params.userId) {
+                    throw new Error('官方 AI 参数解析失败（cozeEnc / userId 为空），请改用自定义接口');
+                }
+                this._officialAiParams = params;
+                this._officialAiParamsTs = Date.now();
+                return params;
+            },
+
+            async _askOfficialAI(question, options) {
+                const p = await this._getOfficialAiParams();
+                let content = '题目：' + question;
+                if (options && options.length) content += '\n选项：' + options.join(' ／ ');
+                content += '\n请只返回答案本身：选择题或判断题返回正确选项的字母；多选题返回全部正确选项字母；' +
+                    '填空题返回应填的词或短语；问答题返回简短要点。不要解释，不要多余文字。';
+
+                const body = [{
+                    role: 'user',
+                    content: content,
+                    baseData: {
+                        conversationId: p.conversationId,
+                        userId: p.userId,
+                        appId: '1192651262850',
+                        botId: '7438777570621653018',
+                        custom_variables: {
+                            courseName: p.courseName,
+                            studentName: p.studentName,
+                            weakKnowledgePoint: '{}',
+                        },
+                        shortcut_command: {},
+                        sourceInfo: '',
+                        sdkFlag: 'false',
+                        courseid: p.courseId,
+                        clazzid: p.clazzId,
+                        personid: p.personId,
+                    },
+                }];
+                const url = 'https://stat2-ans.chaoxing.com/stat2/bot/talk-v1' +
+                    '?cozeEnc=' + encodeURIComponent(p.cozeEnc) +
+                    '&botId=7438777570621653018' +
+                    '&userId=' + encodeURIComponent(p.userId) +
+                    '&appId=1192651262850' +
+                    '&courseid=' + encodeURIComponent(p.courseId) +
+                    '&clazzid=' + encodeURIComponent(p.clazzId) + '&ut=s';
+                const resp = await fetch(url, {
+                    method: 'POST',
+                    credentials: 'include',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Accept': '*/*',
+                        'Origin': 'https://stat2-ans.chaoxing.com',
+                    },
+                    body: JSON.stringify(body),
+                });
+                if (!resp.ok) throw new Error('官方 AI 返回 HTTP ' + resp.status);
+                const text = await resp.text();
+
+                // 流式响应：每行内以 $_$ 分段，取 type=coreAnswer 的内容拼接
+                let answer = '';
+                text.split('\n').forEach((line) => {
+                    line.trim().split('$_$').forEach((piece) => {
+                        piece = piece.trim();
+                        if (!piece || piece === 'server-heartbeat' || piece.indexOf('server-current-chatid') === 0) return;
+                        try {
+                            const chunk = JSON.parse(piece);
+                            if (chunk && chunk.type === 'coreAnswer' && chunk.content) answer += chunk.content;
+                        } catch (e) { /* 非 JSON 片段跳过 */ }
+                    });
+                });
+                return answer
+                    .replace(/&quot;/g, '"')
+                    .replace(/&nbsp;/g, ' ')
+                    .replace(/&amp;/g, '&')
+                    .replace(/&lt;/g, '<')
+                    .replace(/&gt;/g, '>')
+                    .trim();
+            },
+
             async _askAI(question, options) {
                 if (!this.configs.aiApiBase) throw new Error('未配置 API 地址（请填写中转代理地址，见 proxy/README.md）');
                 const sys = '你是学习通答题助手。只根据题目给出最简洁的答案：单选题/判断题直接给正确选项字母或内容；多选题给出所有正确选项；填空题给出应填的词或短语；问答题给出简短要点。不要解释、不要序号、不要多余文字。';
@@ -957,6 +1437,45 @@
                 const data = await resp.json().catch(() => null);
                 let ans = data && data.choices && data.choices[0] && data.choices[0].message ? data.choices[0].message.content : '';
                 return (ans || '').trim();
+            },
+
+            // 按配置的来源依次取答案：官方 AI（免费）→ 自定义接口（需代理）
+            async _resolveAnswer(question, options) {
+                const src = this.configs.aiSource || 'official';
+                const errors = [];
+
+                if (src === 'official' || src === 'auto') {
+                    try {
+                        const ans = await this._askOfficialAI(question, options);
+                        if (ans) {
+                            this._aiStat.lastSource = '官方AI';
+                            return ans;
+                        }
+                        errors.push('官方 AI 返回空');
+                    } catch (e) {
+                        errors.push('官方 AI：' + (e && e.message ? e.message : e));
+                    }
+                }
+                if (src === 'custom' || src === 'auto') {
+                    if (!this.configs.aiApiBase) {
+                        errors.push('未配置自定义 API 地址');
+                    } else {
+                        try {
+                            const ans = await this._askAI(question, options);
+                            if (ans) {
+                                this._aiStat.lastSource = '自定义AI';
+                                return ans;
+                            }
+                            errors.push('自定义接口返回空');
+                        } catch (e) {
+                            errors.push('自定义接口：' + (e && e.message ? e.message : e));
+                        }
+                    }
+                }
+                if (errors.length) {
+                    console.warn('%c[AI答题] 取答案失败 → ' + errors.join(' ｜ '), 'color:#FF9800');
+                }
+                return '';
             },
 
             _getQuestionText(qEl) {
@@ -1039,13 +1558,13 @@
 
                 const answer = this._lookupBank(text);
                 if (!answer) {
-                    // 只校验 API 地址：Key 允许为空（由中转代理注入真实密钥，推荐）
-                    if (!this.configs.aiApiBase) {
-                        console.warn('%c[AI答题] 题库未命中且未配置 API 地址，跳过：' + fp, 'color:#FF9800');
+                    // 只有「自定义接口」模式才必须配置 API 地址；官方 AI 模式零配置即可用
+                    if (this.configs.aiSource === 'custom' && !this.configs.aiApiBase) {
+                        console.warn('%c[AI答题] 题库未命中且未配置自定义 API 地址，跳过：' + fp, 'color:#FF9800');
                         return false;
                     }
                     const optTexts = opts.filter(o => !o.isInput).map(o => o.text);
-                    this._askAI(text, optTexts).then(ans => {
+                    this._resolveAnswer(text, optTexts).then(ans => {
                         if (!ans) { this._aiStat.failed++; return; }
                         let ok = false;
                         if (hasChoice) ok = this._answerChoice(opts, ans);

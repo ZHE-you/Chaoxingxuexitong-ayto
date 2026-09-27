@@ -2,7 +2,7 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Node](https://img.shields.io/badge/node-%3E%3D20.11-brightgreen.svg)](https://nodejs.org)
-[![Version](https://img.shields.io/badge/version-3.4.3-orange.svg)](package.json)
+[![Version](https://img.shields.io/badge/version-3.5.0-orange.svg)](package.json)
 [![Build](https://github.com/ZHE-you/Chaoxingxuexitong-ayto/actions/workflows/verify.yml/badge.svg)](https://github.com/ZHE-you/Chaoxingxuexitong-ayto/actions/workflows/verify.yml)
 
 > ⚠️ **免责声明**：本项目仅用于脚本调试、前端自动化研究与页面行为分析，请遵守目标平台（学习通 / 超星）的使用规定，勿用于违规用途。因使用本脚本产生的任何后果由使用者自行承担。
@@ -19,6 +19,10 @@
 - **学习步骤接管**：从“学习目标”步骤自动切到“视频”步骤；手动点击“视频”页签后自动重新接管
 - **章节测验保护**：受限跳转（最多 3 次），防止页面循环
 - **无视频页安全停止**：默认不自动跳过无法识别的课件页，避免触发平台“任务未完成”提示（可手动或配置开启）
+- **🎛️ 悬浮控制台**：倍速滑块、播放/暂停/下一节、静音开关等可视化操作，配置自动记忆
+- **🤖 AI 自动答题**：**默认使用学习通官方内置 AI，免费且零配置**；也支持自定义接口（DeepSeek / 通义 / 豆包 / 智谱 / 星火 / 硅基流动 / OpenAI）
+- **📚 题库优先**：答过的题自动沉淀成本地题库，下次直接命中，不消耗 AI；支持 JSON 导入导出
+- **⚡ 快速学时上报**：可选的实验性模式，直接调用学时接口上报进度，不必真实播放视频（失败自动回退普通播放）
 - **单文件零构建**：无需任何构建步骤，一份源码同时服务于控制台与油猴
 
 ## 📁 目录结构
@@ -92,8 +96,22 @@ app.nextUnit();   // 手动切换到下一小节
 
 针对**视频中途插入题**与**章节小测验**，控制台面板里可开启自动答题。思路参考 [Mortal004/Xuexitong_shuake](https://github.com/Mortal004/Xuexitong_shuake)：先在本地题库检索，搜不到再调用大模型兜底。
 
-- **启用**：展开面板「🤖 AI 答题」→ 勾选「启用自动答题」。脚本每 2.5 秒扫描题目（主页面 + 同域 iframe），命中即答。
-- **题库优先**：用「导入题库」载入整理好的 `JSON`（`{"题目":"答案"}` 或 `[{"q":"...","a":"..."}]`）；答对/搜到的题会沉淀进「导出题库」，下次直接命中，省 token。题库经 `localStorage` 保存。
+### 答案来源（三选一）
+
+面板「🤖 AI 答题」区的下拉框可切换。答题顺序始终是 **本地题库 → AI**，下面说的「AI」指题库没命中时的兜底：
+
+| 来源 | 需要配置吗 | 说明 |
+| --- | --- | --- |
+| **🆓 官方 AI**（默认，推荐） | **零配置** | 调用学习通自己内置的 AI 助手，**完全免费**。不需要 API Key、不需要中转代理、不消耗你的 token。 |
+| 🔧 自定义接口 | 需中转代理 | OpenAI 兼容接口，见下方「密钥怎么填」。适合想要更强模型（如 GPT / 通义 / 豆包 / 智谱 / 星火 / 硅基流动）的场景。 |
+| 🔄 自动 | 两者皆可 | 先试官方 AI，失败后自动回落到你配置的自定义接口。 |
+
+> 面板「服务商快速填充」下拉可一键填入各家接口地址与默认模型名。**除 `local`（你自己的本地代理）外，其余官方接口通常禁止浏览器跨域**，直接填会报 CORS 错误——请先按上面章节跑中转代理。
+
+### 使用
+
+- **启用**：勾选「启用自动答题」。脚本每 2.5 秒扫描题目（主页面 + 同域 iframe），命中即答。
+- **题库优先**：用「导入题库」载入 `JSON`（`{"题目":"答案"}` 或 `[{"q":"...","a":"..."}]`）；答过的题会自动沉淀进「导出题库」，下次直接命中，**不消耗 AI**。题库经 `localStorage` 保存。
 - **AI 兜底**：题库未命中时把题目与选项发给大模型取答案。在「API 设置」里填：
 **🔌 必须先跑一个中转代理（关键）**
 
@@ -127,6 +145,28 @@ npx wrangler deploy
   - **API 地址**：OpenAI 兼容的 `/v1/chat/completions` 端点，即上面代理的地址。
   - **API Key**：**建议留空**（见下方「密钥怎么填」）。留空后由代理注入真实密钥，浏览器里不存任何密钥。
   - **模型名**：如 `deepseek-chat`（默认）。
+
+## ⚡ 快速学时上报（不真实播放）
+
+默认模式下脚本是真的在播视频（受倍速上限约束）。**快速模式**改为直接向学习通的「提交学时」接口上报观看进度，**不必真的把视频放完**：
+
+```
+接口：GET https://mooc1.chaoxing.com/mooc-ans/multimedia/log/a/{cpi}/{dtoken}
+enc  ：md5("[clazzId][userId][jobid][objectId][playingTime*1000][d_yHJ!$pdA~5][duration*1000][0_duration]")
+```
+
+开启方式：面板 → `⚡ 快速模式 / API 设置` → 勾选 **`⚡ 快速学时上报`**。
+
+行为与安全设计：
+
+- 脚本会先用 `/ananas/status/{objectId}` 拿到真实时长 `duration`，再按 `vtStepSec`（默认 58 秒）逐步上报，直到接口返回 `isPassed`
+- **每轮之间保留 1.5 秒间隔**，避免瞬间连发触发服务端风控 —— 相比真实播放仍是数量级的提速
+- 开启后**自动暂停真实播放**，避免同一节的学时被重复计时
+- 触发 `403` 时自动切换为手机端（`view=json`）重试；仍失败则**自动回退普通播放模式**，保证刷课不中断
+- 参数解析不全（拿不到 `objectId` / `userId` / `cpi` 等）时同样安全回退，并在控制台打印缺失项
+- 面板状态会显示 `⚡快速` 与实时进度（如 `上报 116/600s (19.3%)`）
+
+> ⚠️ 该功能依赖服务端行为，**属于实验性能力**：不同学校 / 不同课程可能出现「学时打回」或风控。若发现某门课进度被清，请关闭此开关回到普通播放模式。如遇问题时请把控制台里 `[快速模式]` 开头的日志发到 Issues。
 
 ## 🔑 密钥怎么填（三种方式，按安全程度排序）
 
@@ -201,9 +241,13 @@ app.configs.aiApiKey = ''; localStorage.removeItem('xtAi_apiKey');
 | `autoAdvanceNoVideo` | `false` | 是否在无视频小节自动切换（默认关闭，安全起见） |
 | `muted` | `false` | 是否静音播放（控制台「静音播放」开关对应此值） |
 | `aiEnabled` | `false` | 是否启用 AI 自动答题 |
+| `aiSource` | `official` | 答案来源：`official`=官方免费 AI / `custom`=自定义接口 / `auto`=官方优先失败回落 |
 | `aiApiBase` | `https://api.deepseek.com/v1/chat/completions` | 大模型接口地址（建议填中转代理，官方接口禁跨域） |
 | `aiApiKey` | `''` | 大模型 API Key（明文存本机 localStorage，公共电脑慎用） |
 | `aiModel` | `deepseek-chat` | 模型名 |
+| `fastVideo` | `false` | 是否开启「快速学时上报」（不真实播放，直接调学时接口） |
+| `vtStepSec` | `58` | 快速模式每次上报推进的秒数 |
+| `vtLoopMax` | `400` | 单个视频最多上报轮数，防死循环 |
 
 将 `autoAdvanceNoVideo` 改为 `true` 可让脚本自动跳过无视频小节（请先确认课程结构安全）。
 
@@ -238,6 +282,10 @@ CI（`.github/workflows/verify.yml`）在每次 push / PR 时自动执行该校�
 
 **Q：为什么倍速 / 任务点不被接受？**
 平台可能服务端强制倍速与完成情况，本脚本不尝试绕过，这属于平台限制。
+
+## 🙏 技术参考
+
+答题策略与部分接口实现参考了开源项目 [yatori-dev/yatori-go-console](https://github.com/yatori-dev/yatori-go-console) 与 [Mortal004/Xuexitong_shuake](https://github.com/Mortal004/Xuexitong_shuake)，在此致谢。
 
 ## 📜 历史版本
 
