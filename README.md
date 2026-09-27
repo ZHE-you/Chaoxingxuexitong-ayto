@@ -339,13 +339,15 @@ CI（`.github/workflows/verify.yml`）在每次 push / PR 时自动执行该校�
 
 <div align="center">
 
-<img src="img/donate.jpg" alt="赞赏码" width="260">
+<img src="https://cdn.jsdelivr.net/gh/ZHE-you/Chaoxingxuexitong-ayto@main/img/donate.jpg" alt="赞赏码" width="260">
 
 **感谢支持**
 
 </div>
 
 > 赞赏纯属自愿，与功能使用无关；不开赞赏同样可以使用全部功能。
+>
+> 若图片加载不出来（部分网络访问 GitHub 图床受限），可 [点此直接查看](https://github.com/ZHE-you/Chaoxingxuexitong-ayto/blob/main/img/donate.jpg)。
 
 ## 📄 许可证
 
