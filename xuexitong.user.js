@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         学习通自动刷课脚本
 // @namespace    https://github.com/ZHE-you/Chaoxingxuexitong-ayto
-// @version      3.3.1
+// @version      3.4.0
 // @description  自动播放、自动切换下一节，并在页面结构异常时安全停止。单文件：可直接粘贴到浏览器控制台，也可导入 Tampermonkey。
 // @author       夏至子 (ZHE-you)
 // @homepageURL  https://github.com/ZHE-you/Chaoxingxuexitong-ayto
@@ -82,6 +82,10 @@
             _videoEl: null,
             _treeContainerEl: null,
             _isPlaying: false,
+            _userPaused: false,
+            _started: false,
+            _ui: null,
+            _uiTimer: null,
             _currentRetryCount: 0,
             _checkInterval: null,
             _eventVideoEl: null,
@@ -100,6 +104,8 @@
             },
             run() {
                 console.log("%c=== 学习通自动刷课脚本 V3 优化版启动 ===", "color:#4CAF50;font-size:16px;font-weight:bold");
+                this._started = true;
+                this._userPaused = false;
                 this._nextUnitPending = false;
                 this._chapterAdvanceTimes = 0;
                 this._getTreeContainer();
@@ -161,6 +167,7 @@
                 }, this.configs.videoCheckInterval);
             },
             _tryResumePlayback(reason) {
+                if (this._userPaused) return;
                 const now = Date.now();
                 if (now - this._guardLastResumeTs < this.configs.guardResumeCooldownMs) {
                     return;
@@ -184,7 +191,7 @@
                     const video = this._getVideoEl();
                     if (!video) return;
 
-                    if (video.paused && this._isPlaying) {
+                    if (video.paused && this._isPlaying && !this._userPaused) {
                         console.log("%c检测到视频暂停，尝试恢复播放...", "color:#FF5722");
                         this._tryResumePlayback("paused");
                     } else if (this._isPlaying && !video.ended) {
@@ -207,7 +214,7 @@
                         }
                     }
 
-                    if (video.ended && this._isPlaying) {
+                    if (video.ended && this._isPlaying && !this._userPaused) {
                         console.log("%c检测到视频结束，准备切换下一个...", "color:#9C27B0");
                         this._isPlaying = false;
                         setTimeout(() => this.nextUnit(), 1000);
@@ -331,7 +338,7 @@
                 this._chapterAdvanceTimes++;
                 console.log('%c检测到章节测验，尝试进入下一学习步骤', 'color:#607D8B');
                 nextButton.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
-                setTimeout(() => this.play(), 2000);
+                setTimeout(() => { if (!this._userPaused) this.play(); }, 2000);
             },
             _bindStepNavigation() {
                 if (this._stepNavigationBound) {
@@ -348,7 +355,7 @@
                         try {
                             this._initCellData();
                         } catch (e) {}
-                        this.play();
+                        if (!this._userPaused) this.play();
                     }, 1800);
                 };
 
@@ -415,7 +422,7 @@
                 console.log("%c等待视频加载...", "color:#FF9800");
                 setTimeout(() => {
                     this._initCellData();
-                    if (this.configs.autoplay) {
+                    if (this.configs.autoplay && !this._userPaused) {
                         this.play();
                     }
                 }, 3000);
@@ -536,7 +543,7 @@
             },
             _handleVideoLoaded(e) {
                 console.log(`%c============视频加载完成=============`, "color:#2196F3");
-                if (this.configs.autoplay && !this._isPlaying) {
+                if (this.configs.autoplay && !this._isPlaying && !this._userPaused) {
                     this.play();
                 }
             },
@@ -572,10 +579,15 @@
             },
             destroy() {
                 this._isPlaying = false;
+                this._userPaused = true;
                 this._clearCheckInterval();
                 this._detachVideoEvents();
                 if (this._delayedNextUnitTimer) clearTimeout(this._delayedNextUnitTimer);
+                if (this._uiTimer) { clearInterval(this._uiTimer); this._uiTimer = null; }
+                this._ui = null;
                 $(document).off('.xuexitongPlayerV3');
+                const panel = document.getElementById('xtControlPanel');
+                if (panel) panel.remove();
                 if (this._pageGuards) {
                     const { preventPause, resumePlaybackNow } = this._pageGuards;
                     document.removeEventListener('mouseleave', preventPause);
@@ -587,10 +599,186 @@
                     this._pageGuards = null;
                 }
             },
+            _loadSavedConfigs() {
+                try {
+                    const map = {
+                        playbackRate: ['xtCfg_playbackRate', (v) => parseFloat(v)],
+                        autoplay: ['xtCfg_autoplay', (v) => v === '1'],
+                        autoAdvanceNoVideo: ['xtCfg_autoAdvanceNoVideo', (v) => v === '1'],
+                    };
+                    for (const key in map) {
+                        const [k, parse] = map[key];
+                        const raw = localStorage.getItem(k);
+                        if (raw !== null) {
+                            const val = parse(raw);
+                            if (key === 'playbackRate' && (isNaN(val) || val <= 0)) continue;
+                            this.configs[key] = val;
+                        }
+                    }
+                } catch (e) {}
+            },
+            _saveConfig(key, value) {
+                try {
+                    const store = { playbackRate: 'xtCfg_playbackRate', autoplay: 'xtCfg_autoplay', autoAdvanceNoVideo: 'xtCfg_autoAdvanceNoVideo' };
+                    localStorage.setItem(store[key], String(value));
+                } catch (e) {}
+            },
+            pause() {
+                if (this._userPaused) return;
+                this._userPaused = true;
+                this._isPlaying = false;
+                this._clearCheckInterval();
+                const v = this._getVideoEl();
+                if (v) v.pause();
+                console.log('%c[控制台] 已暂停，不再自动续播', 'color:#FF9800');
+            },
+            resume() {
+                this._userPaused = false;
+                const v = this._getVideoEl();
+                if (v) {
+                    v.playbackRate = this.configs.playbackRate;
+                    v.play().then(() => {
+                        this._isPlaying = true;
+                        this._startVideoMonitoring();
+                    }).catch(() => {});
+                } else {
+                    this.play();
+                }
+            },
+            stop() {
+                this._userPaused = true;
+                this._isPlaying = false;
+                this._started = false;
+                this._clearCheckInterval();
+                this._detachVideoEvents();
+                const v = this._getVideoEl();
+                if (v) v.pause();
+                console.log('%c[控制台] 已停止', 'color:#F44336');
+            },
+            _buildUI() {
+                if (document.getElementById('xtControlPanel')) return;
+                const css = `
+#xtControlPanel{position:fixed;top:16px;right:16px;z-index:2147483647;width:248px;font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;font-size:13px;color:#222;background:#fff;border:1px solid #e0e0e0;border-radius:10px;box-shadow:0 6px 24px rgba(0,0,0,.18);user-select:none;overflow:hidden;}
+#xtControlPanel .xt-header{display:flex;align-items:center;justify-content:space-between;padding:8px 10px;background:linear-gradient(135deg,#3b82f6,#2563eb);color:#fff;cursor:move;font-weight:600;}
+#xtControlPanel .xt-min{background:rgba(255,255,255,.25);border:none;color:#fff;width:22px;height:22px;border-radius:5px;cursor:pointer;font-size:14px;line-height:1;}
+#xtControlPanel .xt-body{padding:10px;}
+#xtControlPanel.xt-collapsed .xt-body{display:none;}
+#xtControlPanel .xt-status{font-size:12px;color:#555;margin-bottom:2px;}
+#xtControlPanel .xt-status b{color:#2563eb;}
+#xtControlPanel .xt-info{font-size:11px;color:#888;margin-bottom:8px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+#xtControlPanel .xt-row{display:flex;align-items:center;gap:6px;margin-bottom:8px;flex-wrap:wrap;}
+#xtControlPanel .xt-speed{flex-direction:column;align-items:stretch;gap:4px;}
+#xtControlPanel .xt-speed label{display:flex;justify-content:space-between;font-size:12px;color:#444;}
+#xtControlPanel input[type=range]{width:100%;}
+#xtControlPanel .xt-btn{flex:1;min-width:64px;padding:7px 4px;border:1px solid #d0d5dd;border-radius:7px;background:#f9fafb;color:#222;cursor:pointer;font-size:12px;}
+#xtControlPanel .xt-btn:hover{background:#eef2ff;}
+#xtControlPanel .xt-btn.xt-primary{background:#2563eb;color:#fff;border-color:#2563eb;}
+#xtControlPanel .xt-btn.xt-primary:hover{background:#1d4ed8;}
+#xtControlPanel .xt-btn.xt-danger{background:#fff;color:#dc2626;border-color:#fca5a5;}
+#xtControlPanel .xt-btn.xt-danger:hover{background:#fef2f2;}
+#xtControlPanel .xt-checks label{display:flex;align-items:center;gap:4px;font-size:12px;color:#444;flex:1;}
+#xtControlPanel .xt-tip{font-size:10px;color:#aaa;line-height:1.4;}
+`;
+                const style = document.createElement('style');
+                style.textContent = css;
+                document.head.appendChild(style);
+
+                const panel = document.createElement('div');
+                panel.id = 'xtControlPanel';
+                panel.innerHTML =
+                    '<div class="xt-header"><span>学习通刷课控制台</span><button class="xt-min" title="收起/展开">—</button></div>' +
+                    '<div class="xt-body">' +
+                        '<div class="xt-status">状态：<b id="xtState">空闲</b></div>' +
+                        '<div class="xt-info" id="xtInfo">—</div>' +
+                        '<div class="xt-row xt-speed"><label>播放倍速 <span id="xtSpeedVal">1.5</span>x</label><input type="range" id="xtSpeed" min="0.5" max="4" step="0.5" value="1.5"></div>' +
+                        '<div class="xt-row xt-btns"><button id="xtPlay" class="xt-btn xt-primary">开始</button><button id="xtPause" class="xt-btn">暂停</button><button id="xtNext" class="xt-btn">下一节</button></div>' +
+                        '<div class="xt-row xt-btns"><button id="xtRerun" class="xt-btn">重新运行</button><button id="xtStop" class="xt-btn xt-danger">停止</button></div>' +
+                        '<div class="xt-row xt-checks"><label><input type="checkbox" id="xtAutoplay"> 自动播放</label><label><input type="checkbox" id="xtSkipNoVideo"> 无视频跳过</label></div>' +
+                        '<div class="xt-tip">倍速即时生效；暂停后不再自动续播。配置自动保存。</div>' +
+                    '</div>';
+                document.body.appendChild(panel);
+
+                const byId = (id) => document.getElementById(id);
+                const speed = byId('xtSpeed');
+                const speedVal = byId('xtSpeedVal');
+                const stateEl = byId('xtState');
+                const infoEl = byId('xtInfo');
+                const autoplayCb = byId('xtAutoplay');
+                const skipCb = byId('xtSkipNoVideo');
+
+                speed.value = this.configs.playbackRate;
+                speedVal.textContent = this.configs.playbackRate;
+                autoplayCb.checked = !!this.configs.autoplay;
+                skipCb.checked = !!this.configs.autoAdvanceNoVideo;
+
+                speed.addEventListener('input', () => {
+                    const v = parseFloat(speed.value);
+                    if (isNaN(v) || v <= 0) return;
+                    speedVal.textContent = v;
+                    this.configs.playbackRate = v;
+                    this._saveConfig('playbackRate', v);
+                    const video = this._getVideoEl();
+                    if (video) video.playbackRate = v;
+                });
+                autoplayCb.addEventListener('change', () => {
+                    this.configs.autoplay = autoplayCb.checked;
+                    this._saveConfig('autoplay', autoplayCb.checked ? '1' : '0');
+                });
+                skipCb.addEventListener('change', () => {
+                    this.configs.autoAdvanceNoVideo = skipCb.checked;
+                    this._saveConfig('autoAdvanceNoVideo', skipCb.checked ? '1' : '0');
+                });
+                byId('xtPlay').addEventListener('click', () => {
+                    if (!this._started) this.run(); else this.resume();
+                });
+                byId('xtPause').addEventListener('click', () => this.pause());
+                byId('xtNext').addEventListener('click', () => this.nextUnit());
+                byId('xtRerun').addEventListener('click', () => this.run());
+                byId('xtStop').addEventListener('click', () => this.stop());
+                panel.querySelector('.xt-min').addEventListener('click', () => {
+                    panel.classList.toggle('xt-collapsed');
+                });
+
+                this._makeDraggable(panel, panel.querySelector('.xt-header'));
+
+                this._ui = { stateEl, infoEl };
+                this._updateStatus();
+                this._uiTimer = setInterval(() => this._updateStatus(), 800);
+            },
+            _updateStatus() {
+                if (!this._ui) return;
+                const { stateEl, infoEl } = this._ui;
+                let state = '空闲';
+                if (this._userPaused) state = '已暂停';
+                else if (this._isPlaying) state = '运行中';
+                stateEl.textContent = state;
+                const cd = this._cellData;
+                infoEl.textContent = '第' + (cd.currentCellIndex + 1) + '章 第' + (cd.currentNCellIndex + 1) + '节 · ' + (cd.currentVideoTitle || '—');
+            },
+            _makeDraggable(panel, handle) {
+                let sx = 0, sy = 0, ox = 0, oy = 0, dragging = false;
+                handle.addEventListener('mousedown', (e) => {
+                    dragging = true;
+                    const rect = panel.getBoundingClientRect();
+                    ox = rect.left; oy = rect.top;
+                    sx = e.clientX; sy = e.clientY;
+                    e.preventDefault();
+                });
+                document.addEventListener('mousemove', (e) => {
+                    if (!dragging) return;
+                    panel.style.left = (ox + e.clientX - sx) + 'px';
+                    panel.style.top = (oy + e.clientY - sy) + 'px';
+                    panel.style.right = 'auto';
+                });
+                document.addEventListener('mouseup', () => { dragging = false; });
+            },
         };
 
         window.app = app;
         window[APP_KEY] = app;
+
+        try { app._loadSavedConfigs(); } catch (e) {}
+        app._buildUI();
 
         try {
             app.run();

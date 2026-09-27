@@ -2,7 +2,7 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Node](https://img.shields.io/badge/node-%3E%3D20.11-brightgreen.svg)](https://nodejs.org)
-[![Version](https://img.shields.io/badge/version-3.3.1-orange.svg)](package.json)
+[![Version](https://img.shields.io/badge/version-3.4.0-orange.svg)](package.json)
 [![Build](https://github.com/ZHE-you/Chaoxingxuexitong-ayto/actions/workflows/verify.yml/badge.svg)](https://github.com/ZHE-you/Chaoxingxuexitong-ayto/actions/workflows/verify.yml)
 
 > ⚠️ **免责声明**：本项目仅用于脚本调试、前端自动化研究与页面行为分析，请遵守目标平台（学习通 / 超星）的使用规定，勿用于违规用途。因使用本脚本产生的任何后果由使用者自行承担。
@@ -62,6 +62,24 @@ app.nextUnit();   // 手动切换到下一小节
 3. 确认脚本已启用，刷新学习通播放页面即可自动运行
 
 > 脚本**复用页面自带的 jQuery**（学习通页面已内置），不会额外引入第二个 jQuery；仅当页面完全没有 jQuery 时才动态注入一份作为兜底。
+
+## 🎛️ 控制面板
+
+脚本启动后会在页面**右上角**自动生成一个悬浮控制台（无需任何配置），可直接在页面上操作，不必再敲命令：
+
+- **状态 / 章节信息**：实时显示「运行中 / 已暂停 / 空闲」以及当前所在「第 X 章 第 Y 节 · 标题」。
+- **播放倍速**：滑块范围 `0.5x – 4x`，**拖动即时生效**，会同步应用到正在播放的视频，并自动记住你的选择。
+- **开始 / 继续**：首次点击开始刷课；暂停后点击则从当前进度继续。
+- **暂停**：暂停视频并**停止自动续播**（之前脚本会一直尝试把暂停的视频拉起来播，现在由你掌控）。
+- **下一节**：手动切换到下一个视频 / 章节。
+- **重新运行**：重置状态并重新初始化（相当于刷新页面后重来）。
+- **停止**：彻底停止脚本监控并暂停视频。
+- **开关**：`自动播放`、`无视频自动跳过` 两个勾选项，改动后即时生效并保存。
+- 面板顶部蓝条可**拖动**改变位置，右上角 `—` 可**收起 / 展开**。
+
+> 倍速、自动播放、无视频跳过三项配置会通过 `localStorage` 在本机保存，下次打开同一站点时自动恢复。
+>
+> 若不想看到面板，可在控制台执行 `app.destroy()` 移除它（同时停止脚本）。
 
 ## ⚙️ 配置说明
 
