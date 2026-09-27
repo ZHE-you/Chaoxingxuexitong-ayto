@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         学习通自动刷课脚本
 // @namespace    https://github.com/ZHE-you/Chaoxingxuexitong-ayto
-// @version      3.3.0
+// @version      3.3.1
 // @description  自动播放、自动切换下一节，并在页面结构异常时安全停止。单文件：可直接粘贴到浏览器控制台，也可导入 Tampermonkey。
 // @author       ZHE-you
 // @homepageURL  https://github.com/ZHE-you/Chaoxingxuexitong-ayto
@@ -11,7 +11,6 @@
 // @match        *://mooc1.chaoxing.com/mycourse/studentstudy*
 // @match        *://*.chaoxing.com/mycourse/studentstudy*
 // @match        *://*.chaoxing.com/mooc2-ans/mycourse/studentstudy*
-// @require      https://code.jquery.com/jquery-3.6.0.min.js
 // @run-at       document-idle
 // @grant        none
 // ==/UserScript==
@@ -29,13 +28,20 @@
         window[BOOT_TIMER_KEY] = null;
     }
 
+    // 关键：学习通页面自带 jQuery（1.7.2）并在其上挂载了大量页面插件（如 $.getNetScroll）。
+    // 这里绝不能覆盖页面的 window.jQuery / window.$ —— 否则页面自身的插件会丢失，
+    // 控制台将不断刷出 “$.getNetScroll is not a function”。
+    // 因此：页面已有 jQuery 直接复用；仅当页面完全没有时才注入，作为兜底。
     if (typeof window.jQuery === 'undefined') {
         const script = document.createElement('script');
         script.src = 'https://code.jquery.com/jquery-3.6.0.min.js';
         script.type = 'text/javascript';
         script.onload = function () {
-            console.log("jQuery loaded.");
+            console.log('页面未内置 jQuery，已注入一份供脚本使用。');
             waitForCoursePage();
+        };
+        script.onerror = function () {
+            console.error('jQuery 加载失败，脚本无法运行。');
         };
         document.head.appendChild(script);
     } else {

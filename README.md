@@ -2,7 +2,7 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Node](https://img.shields.io/badge/node-%3E%3D20.11-brightgreen.svg)](https://nodejs.org)
-[![Version](https://img.shields.io/badge/version-3.3.0-orange.svg)](package.json)
+[![Version](https://img.shields.io/badge/version-3.3.1-orange.svg)](package.json)
 [![Build](https://github.com/ZHE-you/Chaoxingxuexitong-ayto/actions/workflows/verify.yml/badge.svg)](https://github.com/ZHE-you/Chaoxingxuexitong-ayto/actions/workflows/verify.yml)
 
 > ⚠️ **免责声明**：本项目仅用于脚本调试、前端自动化研究与页面行为分析，请遵守目标平台（学习通 / 超星）的使用规定，勿用于违规用途。因使用本脚本产生的任何后果由使用者自行承担。
@@ -61,7 +61,7 @@ app.nextUnit();   // 手动切换到下一小节
 2. 将 [`xuexitong.user.js`](xuexitong.user.js) 拖入浏览器窗口，或在其管理面板“添加新脚本”里粘贴保存
 3. 确认脚本已启用，刷新学习通播放页面即可自动运行
 
-> 油猴版通过 `@require` 加载 jQuery，无需手动引入；控制台版会在运行时自动注入 jQuery。
+> 脚本**复用页面自带的 jQuery**（学习通页面已内置），不会额外引入第二个 jQuery；仅当页面完全没有 jQuery 时才动态注入一份作为兜底。
 
 ## ⚙️ 配置说明
 
@@ -101,7 +101,11 @@ CI（`.github/workflows/verify.yml`）在每次 push / PR 时自动执行该校�
 **Q：为什么“无视频/课件”页不会自动跳过？**
 默认 `autoAdvanceNoVideo = false`，避免在课件未完成时反复触发平台的“当前章节还有任务未完成”提示。确认安全后可手动 `app.nextUnit()` 或开启该配置。
 
-**Q：倍速 / 任务点不被接受？**
+**Q：控制台一直刷 `$.getNetScroll is not a function` 怎么办？**
+这是**重复引入 jQuery** 造成的：学习通页面自带 jQuery（1.7.2），并在其上挂载了页面自己的插件（如 `$.getNetScroll`）。一旦再引入第二份 jQuery，页面的 `window.$` / `window.jQuery` 会被替换成新版本，页面插件随之丢失，页面代码每次调用就抛错并持续刷屏。
+本脚本自 **v3.3.1** 起已改为**复用页面自带 jQuery**、不再引入第二份 jQuery。若你仍在旧版本上遇到该报错，请更新脚本；另外请勿在控制台手动额外加载 jQuery，刷新页面后只执行脚本本身即可。
+
+**Q：为什么倍速 / 任务点不被接受？**
 平台可能服务端强制倍速与完成情况，本脚本不尝试绕过，这属于平台限制。
 
 ## 📜 历史版本
