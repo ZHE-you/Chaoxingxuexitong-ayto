@@ -1,9 +1,13 @@
 // ==UserScript==
 // @name         学习通自动刷课脚本
-// @namespace    local.codex.xuexitong
+// @namespace    https://github.com/ZHE-you/Chaoxingxuexitong-ayto
 // @version      3.3.0
 // @description  自动播放、自动切换下一节，并在页面结构异常时安全停止。单文件：可直接粘贴到浏览器控制台，也可导入 Tampermonkey。
-// @author       xuexitongScript contributors
+// @author       ZHE-you
+// @homepageURL  https://github.com/ZHE-you/Chaoxingxuexitong-ayto
+// @supportURL   https://github.com/ZHE-you/Chaoxingxuexitong-ayto/issues
+// @updateURL    https://raw.githubusercontent.com/ZHE-you/Chaoxingxuexitong-ayto/main/xuexitong.user.js
+// @downloadURL  https://raw.githubusercontent.com/ZHE-you/Chaoxingxuexitong-ayto/main/xuexitong.user.js
 // @match        *://mooc1.chaoxing.com/mycourse/studentstudy*
 // @match        *://*.chaoxing.com/mycourse/studentstudy*
 // @match        *://*.chaoxing.com/mooc2-ans/mycourse/studentstudy*
