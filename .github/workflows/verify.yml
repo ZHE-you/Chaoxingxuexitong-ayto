@@ -18,8 +18,5 @@ jobs:
         with:
           node-version: "20"
 
-      - name: Build userscript
-        run: node scripts/build-userscript.mjs
-
-      - name: Verify source and userscript
+      - name: Verify single-file script
         run: node tests/verify-v3.mjs

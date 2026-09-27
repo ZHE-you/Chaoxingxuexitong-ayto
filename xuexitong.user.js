@@ -1,9 +1,9 @@
 // ==UserScript==
-// @name         学习通自动刷课脚本 V3 稳定版
+// @name         学习通自动刷课脚本
 // @namespace    local.codex.xuexitong
 // @version      3.3.0
-// @description  自动播放、自动切换下一节，并在页面结构异常时安全停止
-// @author       Codex
+// @description  自动播放、自动切换下一节，并在页面结构异常时安全停止。单文件：可直接粘贴到浏览器控制台，也可导入 Tampermonkey。
+// @author       xuexitongScript contributors
 // @match        *://mooc1.chaoxing.com/mycourse/studentstudy*
 // @match        *://*.chaoxing.com/mycourse/studentstudy*
 // @match        *://*.chaoxing.com/mooc2-ans/mycourse/studentstudy*
