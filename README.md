@@ -28,7 +28,7 @@
 ├── xuexitong.user.js     # 唯一脚本文件：控制台 + 油猴通用
 ├── tests/
 │   └── verify-v3.mjs     # 语法校验（node --check）
-├── img/                  # 文档截图
+├── img/                  # 文档截图与赞赏码
 ├── archive/              # 历史版本（v2 / 旧版）及旧文档
 │   ├── v2.js
 │   ├── xuexitong.js
@@ -107,6 +107,20 @@ CI（`.github/workflows/verify.yml`）在每次 push / PR 时自动执行该校�
 ## 📜 历史版本
 
 旧版实现（v2 及更早）已归档在 [`archive/`](archive/) 目录，仅供对照参考，不再维护。详细的问题复盘见 [`ISSUES_REVIEW.md`](ISSUES_REVIEW.md)。
+
+## ❤️ 支持作者
+
+本项目完全免费开源，脚本会持续跟进学习通页面结构的变化。如果它帮你省下了时间，欢迎请作者喝杯咖啡 ☕，你的支持是持续维护的最大动力。
+
+<div align="center">
+
+<img src="img/donate.jpg" alt="赞赏码" width="260">
+
+**感谢支持**
+
+</div>
+
+> 赞赏纯属自愿，与功能使用无关；不开赞赏同样可以使用全部功能。
 
 ## 📄 许可证
 
