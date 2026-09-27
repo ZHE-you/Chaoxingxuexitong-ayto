@@ -168,6 +168,43 @@ enc  ：md5("[clazzId][userId][jobid][objectId][playingTime*1000][d_yHJ!$pdA~5][
 
 > ⚠️ 该功能依赖服务端行为，**属于实验性能力**：不同学校 / 不同课程可能出现「学时打回」或风控。若发现某门课进度被清，请关闭此开关回到普通播放模式。如遇问题时请把控制台里 `[快速模式]` 开头的日志发到 Issues。
 
+## ⚡ 快速学时上报模式（免真实播放）
+
+默认模式是「真实播放视频」，速度受限于播放倍速。**快速模式**改为直接向学习通的学时接口上报观看进度，不必真正播放，速度因此快一个数量级。实现参考了 [yatori-go-core](https://github.com/yatori-dev/yatori-go-core) 的接口方案。
+
+**工作流程**
+
+1. **拉取任务点卡片**：`GET {当前域名}/mooc-ans/knowledge/cards?clazzid=&courseid=&knowledgeid=&cpi=`，从返回内容中用正则 `mArg = ([^;]{6,})` 提取出 JSON，其中包含任务点的 `objectId / jobid / otherInfo / attDurationEnc / rt` 等全量参数。使用当前域名构造请求，保证同源、天然规避跨域。
+2. **提交学时**：`GET https://mooc1.chaoxing.com/mooc-ans/multimedia/log/a/{cpi}/{ktoken}?...&enc={签名}&isdrag=0&view=pc`，每轮按 `vtStepSec`（默认 58 秒）推进进度，直到响应返回 `isPassed: true`。
+3. **enc 签名**：`MD5("[clazzId][userId][jobid][objectId][playingTime*1000]d_yHJ!$pdA~5[duration*1000][0_{duration}]")`。
+
+**开启方式**：面板 →「⚡ 快速模式 / API 设置」→ 勾选「⚡ 快速学时上报（免真实播放）」。
+
+**兜底设计**（任何一步失败都安全回退到普通播放，不会卡死）
+
+| 情况 | 处理策略 |
+|---|---|
+| URL 缺少 courseId / clazzId / cpi / knowledgeId | 直接回退普通播放 |
+| 卡片接口不可用 | 回退到 `ananas/status` 备用数据源 |
+| HTTP 403（页面人脸 / 风控） | 自动切换手机端模式重试，仍失败则回退 |
+| 进度到终点却仍未通过 | 进入「过超提交」按 5 秒步进重试，超时则回退 |
+| 你点了「暂停」 | 立即停止上报 |
+| 本节任务点全部已完成 | 自动切换下一节 |
+
+> ⚠️ 该模式直接向服务端提交学时数据，属于平台敏感行为。请自行评估风险，建议先用无关紧要的课程验证；若担心被检测到，保持默认的普通播放模式即可。
+
+## 🌐 外部在线题库（可选）
+
+除本地题库与 AI 外，还能对接外部题库服务（设计参考 yatori-go-console 的 `apiQueSetting`）：在面板「外部题库接口 URL」填入服务地址即可。
+
+- **请求**：`POST {"question":"题面","options":["A","B"],"type":"auto"}`
+- **响应**兼容多种格式：`{"answer":"C"}` / `{"data":{"answer":"C"}}` / `{"data":"C"}` / `[{"q":"题面","a":"C"}]` / 纯文本 `C`
+- 超时 8 秒、任何异常都安全返回空值，自动回落到 AI
+
+**答题优先级**：本地题库 → 外部题库 → AI。命中题库时不消耗任何 token。
+
+> 只配置题库、不配置 AI 也可以正常答题，此时题库命中就答，未命中则跳过并记录失败。
+
 ## 🔑 密钥怎么填（三种方式，按安全程度排序）
 
 > ⚠️ **先说风险**：脚本里填的 Key 会以**明文**存在浏览器的 `localStorage`。同一页面上运行的任何脚本、第三方浏览器扩展、以及能接触这台电脑的人都能读到它。**不要在学校机房 / 公用电脑上使用方式三。**
@@ -241,6 +278,11 @@ app.configs.aiApiKey = ''; localStorage.removeItem('xtAi_apiKey');
 | `autoAdvanceNoVideo` | `false` | 是否在无视频小节自动切换（默认关闭，安全起见） |
 | `muted` | `false` | 是否静音播放（控制台「静音播放」开关对应此值） |
 | `aiEnabled` | `false` | 是否启用 AI 自动答题 |
+| `aiSource` | `official` | 答案来源：`official`=学习通自带 AI（免费零配置）/ `custom`=自定义接口 / `auto`=官方优先、失败回落 |
+| `bankUrl` | `''` | 外部在线题库接口地址（命中则不消耗 AI） |
+| `fastVideo` | `false` | 是否启用快速学时上报（免真实播放） |
+| `vtStepSec` | `58` | 快速模式每轮推进的秒数 |
+| `vtLoopMax` | `400` | 单个视频最大上报轮数，防止死循环 |
 | `aiSource` | `official` | 答案来源：`official`=官方免费 AI / `custom`=自定义接口 / `auto`=官方优先失败回落 |
 | `aiApiBase` | `https://api.deepseek.com/v1/chat/completions` | 大模型接口地址（建议填中转代理，官方接口禁跨域） |
 | `aiApiKey` | `''` | 大模型 API Key（明文存本机 localStorage，公共电脑慎用） |

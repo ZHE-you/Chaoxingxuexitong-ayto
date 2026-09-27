@@ -192,6 +192,8 @@
                 aiApiBase: 'https://api.deepseek.com/v1/chat/completions',
                 aiApiKey: '',
                 aiModel: 'deepseek-chat',
+                // 外部在线题库接口（可选）：命中则直接作答，不消耗 AI token
+                bankUrl: '',
                 // 快速模式：直接向学习通「提交学时」接口上报进度，不必真实播放视频
                 fastVideo: false,
                 vtStepSec: 58,      // 每次上报推进的秒数
@@ -747,6 +749,7 @@
                         aiApiKey: ['xtAi_apiKey', (v) => v],
                         aiModel: ['xtAi_model', (v) => v],
                         aiSource: ['xtAi_source', (v) => v],
+                        bankUrl: ['xtAi_bankUrl', (v) => v],
                         fastVideo: ['xtAi_fastVideo', (v) => v === '1'],
                     };
                     for (const key in map) {
@@ -762,7 +765,7 @@
             },
             _saveConfig(key, value) {
                 try {
-                    const store = { playbackRate: 'xtCfg_playbackRate', autoplay: 'xtCfg_autoplay', autoAdvanceNoVideo: 'xtCfg_autoAdvanceNoVideo', muted: 'xtCfg_muted', aiEnabled: 'xtAi_enabled', aiApiBase: 'xtAi_apiBase', aiApiKey: 'xtAi_apiKey', aiModel: 'xtAi_model', aiSource: 'xtAi_source', fastVideo: 'xtAi_fastVideo' };
+                    const store = { playbackRate: 'xtCfg_playbackRate', autoplay: 'xtCfg_autoplay', autoAdvanceNoVideo: 'xtCfg_autoAdvanceNoVideo', muted: 'xtCfg_muted', aiEnabled: 'xtAi_enabled', aiApiBase: 'xtAi_apiBase', aiApiKey: 'xtAi_apiKey', aiModel: 'xtAi_model', aiSource: 'xtAi_source', bankUrl: 'xtAi_bankUrl', fastVideo: 'xtAi_fastVideo' };
                     localStorage.setItem(store[key], String(value));
                 } catch (e) {}
             },
@@ -873,6 +876,7 @@
                         '<option value="openai">OpenAI</option>' +
                         '<option value="local">本地代理 npm run proxy</option>' +
                         '</select>' +
+                        '<input type="text" id="xtBankUrl" class="xt-inp" placeholder="外部题库接口 URL（可选，命中则不消耗 AI）">' +
                         '<input type="text" id="xtAiBase" class="xt-inp" placeholder="API 地址（如 http://127.0.0.1:8787/v1/chat/completions）">' +
                         '<input type="password" id="xtAiKey" class="xt-inp" placeholder="API Key（留空则由代理注入，推荐）">' +
                         '<input type="text" id="xtAiModel" class="xt-inp" placeholder="模型名(默认 deepseek-chat)">' +
@@ -902,6 +906,8 @@
                 const aiStatEl = byId('xtAiStat');
                 const aiSource = byId('xtAiSource');
                 const aiPreset = byId('xtAiPreset');
+                const bankUrl = byId('xtBankUrl');
+                bankUrl.value = this.configs.bankUrl || '';
                 const aiBase = byId('xtAiBase');
                 const aiKey = byId('xtAiKey');
                 const aiModel = byId('xtAiModel');
@@ -953,11 +959,14 @@
                     this.configs.aiApiBase = aiBase.value.trim();
                     this.configs.aiApiKey = aiKey.value.trim();
                     this.configs.aiModel = aiModel.value.trim() || 'deepseek-chat';
+                    this.configs.bankUrl = bankUrl.value.trim();
                     this._saveConfig('aiApiBase', this.configs.aiApiBase);
                     this._saveConfig('aiApiKey', this.configs.aiApiKey);
                     this._saveConfig('aiModel', this.configs.aiModel);
+                    this._saveConfig('bankUrl', this.configs.bankUrl);
                     console.log('%c[AI答题] API 配置已保存', 'color:#2196F3');
                 };
+                bankUrl.addEventListener('change', saveAiCfg);
                 aiBase.addEventListener('change', saveAiCfg);
                 aiKey.addEventListener('change', saveAiCfg);
                 aiModel.addEventListener('change', saveAiCfg);
@@ -1136,6 +1145,78 @@
                 return res;
             },
 
+            // ==================== 任务点卡片数据 ====================
+            // 参考 yatori-go-core 的做法：从 cards 接口取出内含 attachments / defaults 的
+            // mArg JSON，其中包含 otherInfo、jobid、objectId、rt 以及各种 enc —— 这些正是
+            // 学时上报接口所必需的参数。
+            // 这里用 location.origin 构造地址，保证同源请求、规避跨域问题（浏览器方案的优势）。
+            async _fetchCardsData(ids) {
+                const q = [
+                    'clazzid=' + encodeURIComponent(ids.clazzId),
+                    'courseid=' + encodeURIComponent(ids.courseId),
+                    'knowledgeid=' + encodeURIComponent(ids.knowledgeId),
+                    'num=0', 'ut=s',
+                    'cpi=' + encodeURIComponent(ids.cpi),
+                    'v=2025-0424-1038-3', 'mooc2=1',
+                    'isMicroCourse=false', 'editorPreview=0',
+                ].join('&');
+                const url = location.origin + '/mooc-ans/knowledge/cards?' + q;
+                const resp = await fetch(url, { credentials: 'include', headers: { 'Accept': '*/*' } });
+                if (!resp.ok) throw new Error('获取任务点卡片失败：HTTP ' + resp.status);
+                const text = await resp.text();
+                const m = text.match(/mArg\s*=\s*([^;]{6,})/);
+                if (!m) throw new Error('任务点卡片中未找到 mArg');
+                let data;
+                try {
+                    data = JSON.parse(m[1].trim());
+                } catch (e) {
+                    throw new Error('mArg 解析失败');
+                }
+                return data;
+            },
+
+            // otherInfo 形如 nodeId_x-cpi_x-rt_0.9-ds_0-ff_1... ，rt 隐含在其中
+            _parseRtFromOtherInfo(otherInfo) {
+                const m = String(otherInfo || '').match(/-rt_([^&-]+)/);
+                if (!m) return null;
+                const v = parseFloat(m[1]);
+                return isNaN(v) ? null : v;
+            },
+
+            // 从 cards 数据中挑出一个尚未完成的视频 / 音频任务点
+            _pickMediaPoint(data) {
+                const atts = (data && data.attachments) || [];
+                const d = (data && data.defaults) || {};
+                for (const a of atts) {
+                    if (!a) continue;
+                    const t = (a.type || '').toLowerCase();
+                    if (t !== 'video' && t !== 'audio') continue;
+                    if (!a.job) continue;                 // 非任务点视频无需上报学时
+                    if (a.isPassed) continue;             // 已完成则交给下一个任务点
+                    const duration = Number(a.attDuration || 0);
+                    if (!duration) continue;
+                    const objectId = a.objectId || (a.property && a.property.objectid) || '';
+                    if (!objectId) continue;
+                    const otherInfo = a.otherInfo || '';
+                    return {
+                        type: t,
+                        duration: duration,
+                        playTimeMs: Number(a.playTime || 0), // 注意：接口返回的是毫秒
+                        objectId: objectId,
+                        jobid: a.jobid || (a.property && a.property.jobid) || '',
+                        otherInfo: otherInfo,
+                        rt: this._parseRtFromOtherInfo(otherInfo) || Number(d.rt) || 0.9,
+                        attDurationEnc: a.attDurationEnc || '',
+                        videoFaceCaptureEnc: a.videoFaceCaptureEnc || '',
+                        title: (a.property && a.property.name) || '',
+                        cpi: d.cpi || '',
+                        dtoken: d.ktoken || '',
+                        userid: d.userid || '',
+                    };
+                }
+                return null;
+            },
+
             // 查询视频元数据（时长 / dtoken / rt 等），学时上报签名依赖这些数据
             async _fetchVideoStatus(objectId, fid) {
                 const url = 'https://mooc1-api.chaoxing.com/ananas/status/' + objectId +
@@ -1172,14 +1253,16 @@
                     'duration=' + duration,
                     'clipTime=0_' + duration,
                     'objectId=' + encodeURIComponent(p.objectId),
-                    'otherInfo=otherInfo',
+                    // otherInfo 必须使用任务点卡片里的真值：服务端靠它识别 nodeId / cpi / rt 等，
+                    // 写死常量会导致任务点无法关联，学时永远判不通过
+                    'otherInfo=' + encodeURIComponent(p.otherInfo || 'otherInfo'),
                     'courseId=' + encodeURIComponent(p.courseId),
                     'jobid=' + encodeURIComponent(p.jobid || ''),
                     'userid=' + encodeURIComponent(p.userId),
                     'isdrag=' + isdrag,
                     'view=' + view,
                     'enc=' + enc,
-                    'rt=' + p.rt,
+                    'rt=' + (Math.round((Number(p.rt) || 0.9) * 100) / 100),
                     'videoFaceCaptureEnc=' + encodeURIComponent(p.videoFaceCaptureEnc || ''),
                     'dtype=Video',
                     '_t=' + Date.now(),
@@ -1201,40 +1284,85 @@
             _fastProgress: '',
             async _fastRunCurrentVideo() {
                 const ids = this._getCourseIds();
-                const missing = ['objectId', 'userId', 'cpi', 'clazzId', 'courseId'].filter((k) => !ids[k]);
+                const missing = ['courseId', 'clazzId', 'cpi', 'knowledgeId'].filter((k) => !ids[k]);
                 if (missing.length) {
-                    console.warn('%c[快速模式] 缺少参数：' + missing.join(', ') + '，回退普通播放', 'color:#FF9800');
+                    console.warn('%c[快速模式] 页面 URL 缺少参数：' + missing.join(', ') + '，回退普通播放', 'color:#FF9800');
                     return false;
                 }
 
-                let st;
+                // 首选数据源：任务点卡片（参数最全，含 otherInfo / jobid / 各种 enc）
+                let cards = null;
+                let point = null;
                 try {
-                    st = await this._fetchVideoStatus(ids.objectId, ids.cpi);
+                    cards = await this._fetchCardsData(ids);
+                    point = this._pickMediaPoint(cards);
                 } catch (e) {
-                    console.warn('%c[快速模式] 无法获取视频信息，回退普通播放：' + e.message, 'color:#FF9800');
-                    return false;
-                }
-                if (!st.duration) {
-                    console.warn('%c[快速模式] duration 为 0，回退普通播放', 'color:#FF9800');
-                    return false;
+                    console.warn('%c[快速模式] 任务点卡片获取失败：' + e.message, 'color:#FF9800');
                 }
 
-                const p = {
+                // 卡片里已没有未完成的任务点 —— 说明本节已学完，直接进下一节
+                if (cards && !point) {
+                    console.log('%c[快速模式] 本节任务点均已完成，切换下一节', 'color:#4CAF50');
+                    setTimeout(() => this.nextUnit(), 1200);
+                    return true;
+                }
+
+                // 兜底数据源：ananas/status（卡片接口不可用时）
+                let st = null;
+                if (!point) {
+                    if (ids.objectId) {
+                        try {
+                            st = await this._fetchVideoStatus(ids.objectId, ids.clazzId);
+                        } catch (e) {
+                            console.warn('%c[快速模式] 备用数据源失败：' + e.message, 'color:#FF9800');
+                        }
+                    }
+                    if (!st || !st.duration) {
+                        console.warn('%c[快速模式] 无法获取视频时长，回退普通播放', 'color:#FF9800');
+                        return false;
+                    }
+                }
+
+                const p = point ? {
+                    clazzId: ids.clazzId, courseId: ids.courseId, cpi: point.cpi || ids.cpi,
+                    userId: point.userid || ids.userId, objectId: point.objectId, jobid: point.jobid,
+                    dtoken: point.dtoken, rt: point.rt,
+                    attDurationEnc: point.attDurationEnc, videoFaceCaptureEnc: point.videoFaceCaptureEnc,
+                    otherInfo: point.otherInfo,
+                } : {
                     clazzId: ids.clazzId, courseId: ids.courseId, cpi: ids.cpi,
                     userId: ids.userId, objectId: ids.objectId, jobid: ids.jobid || '',
                     dtoken: st.dtoken, rt: st.rt || 0.9,
                     attDurationEnc: st.attDurationEnc, videoFaceCaptureEnc: st.videoFaceCaptureEnc,
+                    otherInfo: 'otherInfo',
                 };
+
+                if (!p.userId || !p.dtoken) {
+                    console.warn('%c[快速模式] 缺少 userId 或 dtoken，回退普通播放', 'color:#FF9800');
+                    return false;
+                }
+
+                const duration = point ? point.duration : st.duration;
 
                 this._fastRunning = true;
                 // 暂停真实播放，避免与接口上报重复计时
                 try { if (this._videoEl) this._videoEl.pause(); } catch (e) { /* ignore */ }
 
-                let playingTime = st.playTime || 0;
+                // cards 接口返回的 playTime 是毫秒，需换算成秒
+                let playingTime = Math.floor((point ? point.playTimeMs : (st.playTime || 0)) / 1000);
+                // 进度已到终点却未通过（常见于被打回）：从头重报，否则永远停在终点出不去
+                if (playingTime >= duration) playingTime = 0;
+
                 let loops = 0;
                 let view = 'pc';
-                let done = st.isPassed;
+                let done = false;
+                let overTime = 0;
                 const step = Math.max(5, Number(this.configs.vtStepSec) || 58);
+                // 「过超提交」：到达终点后仍按小步进继续提交若干次，等待服务端判定通过
+                const extendSec = 5;
+                const limitTime = Math.max(500, Math.floor(duration / 2));
+                console.log('%c[快速模式] 开始上报（数据源 ' + (point ? 'cards' : 'status') +
+                    '，时长 ' + duration + 's，起点 ' + playingTime + 's）', 'color:#9C27B0;font-weight:bold');
 
                 while (loops < this.configs.vtLoopMax && !done) {
                     if (this._userPaused) {
@@ -1244,7 +1372,7 @@
                     }
                     let text = '';
                     try {
-                        text = await this._submitStudyTime(p, playingTime, st.duration, 0, view);
+                        text = await this._submitStudyTime(p, playingTime, duration, 0, view);
                     } catch (e) {
                         if (/HTTP 403/.test(e.message) && view === 'pc') {
                             console.log('%c[快速模式] 触发 403，切换手机端模式重试', 'color:#FF9800');
@@ -1266,14 +1394,26 @@
                         outTimeMsg = j.OutTimeMsg || '';
                     } catch (e) { /* 非 JSON 响应按未完成处理 */ }
 
-                    const percent = ((playingTime / st.duration) * 100).toFixed(1);
-                    this._fastProgress = '上报 ' + playingTime + '/' + st.duration + 's (' + percent + '%)';
+                    const percent = ((playingTime / duration) * 100).toFixed(1);
+                    this._fastProgress = '上报 ' + playingTime + '/' + duration + 's (' + percent + '%)';
                     console.log('%c[快速模式] ' + this._fastProgress, 'color:#9C27B0');
 
                     if (outTimeMsg === '观看时长超过阈值') { done = true; break; }
-                    if (isPassed === true && playingTime >= st.duration) { done = true; break; }
+                    if (isPassed === true && playingTime >= duration) { done = true; break; }
 
-                    playingTime = Math.min(st.duration, playingTime + step);
+                    // 进度已到终点：进入过超提交，按 5s 步进继续上报等待服务端判定
+                    if (playingTime >= duration) {
+                        overTime += extendSec;
+                        if (overTime >= limitTime) {
+                            console.warn('%c[快速模式] 过超提交超时（>' + limitTime + 's），回退普通播放', 'color:#FF9800');
+                            break;
+                        }
+                        loops++;
+                        await sleep(extendSec * 1000);
+                        continue;
+                    }
+
+                    playingTime = Math.min(duration, playingTime + step);
                     loops++;
                     // 保留短暂间隔降低风控概率；相比真实播放仍是数量级的提速
                     await sleep(1500);
@@ -1403,6 +1543,54 @@
                     .replace(/&lt;/g, '<')
                     .replace(/&gt;/g, '>')
                     .trim();
+            },
+
+            // ==================== 外部在线题库接口 ====================
+            // 设计参考 yatori-go-console 的 apiQueSetting：对接外部题库服务，
+            // 命中即作答，完全不消耗 AI token。约定 POST {"question","options","type"}，
+            // 响应做宽松解析，兼容 {"answer"} / {"data":{"answer"}} / [{q,a}] / 纯文本。
+            async _askBankApi(question, options) {
+                const base = (this.configs.bankUrl || '').trim();
+                if (!base) return '';
+                const ctrl = new AbortController();
+                const timer = setTimeout(() => ctrl.abort(), 8000);
+                try {
+                    const resp = await fetch(base, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ question: question, options: options || [], type: 'auto' }),
+                        signal: ctrl.signal,
+                    });
+                    clearTimeout(timer);
+                    if (!resp.ok) return '';
+                    const text = (await resp.text()).trim();
+                    if (!text) return '';
+                    const pick = (o) => {
+                        if (!o || typeof o !== 'object') return '';
+                        let v = o.answer || o.result || o.a || '';
+                        if (!v && o.data) {
+                            if (typeof o.data === 'string') v = o.data;
+                            else v = o.data.answer || o.data.result || o.data.a || '';
+                        }
+                        return String(v || '').trim();
+                    };
+                    let ans = '';
+                    try {
+                        const j = JSON.parse(text);
+                        ans = pick(j);
+                        if (!ans && Array.isArray(j)) {
+                            const hit = j.find((it) => it && (it.q === question || it.question === question));
+                            if (hit) ans = String(hit.answer || hit.a || '').trim();
+                        }
+                    } catch (e) {
+                        ans = text; // 非 JSON：当作纯文本答案
+                    }
+                    ans = String(ans || '').trim().slice(0, 500);
+                    if (ans) console.log('%c[题库API] 命中：' + ans.slice(0, 50), 'color:#8BC34A');
+                    return ans;
+                } catch (e) {
+                    return '';
+                }
             },
 
             async _askAI(question, options) {
@@ -1558,13 +1746,18 @@
 
                 const answer = this._lookupBank(text);
                 if (!answer) {
-                    // 只有「自定义接口」模式才必须配置 API 地址；官方 AI 模式零配置即可用
-                    if (this.configs.aiSource === 'custom' && !this.configs.aiApiBase) {
-                        console.warn('%c[AI答题] 题库未命中且未配置自定义 API 地址，跳过：' + fp, 'color:#FF9800');
+                    // 只配了题库也可以答题，因此没有 AI 地址不再直接拦截
+                    if (this.configs.aiSource === 'custom' && !this.configs.aiApiBase && !this.configs.bankUrl) {
+                        console.warn('%c[AI答题] 题库未命中，且未配置自定义 API 地址 / 外部题库，跳过：' + fp, 'color:#FF9800');
                         return false;
                     }
                     const optTexts = opts.filter(o => !o.isInput).map(o => o.text);
-                    this._resolveAnswer(text, optTexts).then(ans => {
+                    // 优先级：本地题库 → 外部题库 → AI（官方 / 自定义）
+                    const getAns = this.configs.bankUrl
+                        ? this._askBankApi(text, optTexts)
+                            .then((bankAns) => bankAns || this._resolveAnswer(text, optTexts))
+                        : this._resolveAnswer(text, optTexts);
+                    getAns.then(ans => {
                         if (!ans) { this._aiStat.failed++; return; }
                         let ok = false;
                         if (hasChoice) ok = this._answerChoice(opts, ans);
