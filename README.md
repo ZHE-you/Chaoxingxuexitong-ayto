@@ -2,7 +2,7 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Node](https://img.shields.io/badge/node-%3E%3D20.11-brightgreen.svg)](https://nodejs.org)
-[![Version](https://img.shields.io/badge/version-3.6.1-orange.svg)](package.json)
+[![Version](https://img.shields.io/badge/version-3.6.2-orange.svg)](package.json)
 [![Build](https://github.com/ZHE-you/Chaoxingxuexitong-ayto/actions/workflows/verify.yml/badge.svg)](https://github.com/ZHE-you/Chaoxingxuexitong-ayto/actions/workflows/verify.yml)
 
 > ⚠️ **免责声明**：本项目仅用于脚本调试、前端自动化研究与页面行为分析，请遵守目标平台（学习通 / 超星）的使用规定，勿用于违规用途。因使用本脚本产生的任何后果由使用者自行承担。
@@ -289,6 +289,7 @@ app.configs.aiApiKey = ''; localStorage.removeItem('xtAi_apiKey');
 | 排序题 / 连线题 | ⚠️ 属拖拽 / 点选交互，没有标准控件，脚本会**识别并提示需手动处理**，同时在控制台输出其 DOM 结构，便于后续适配 |
 
 - **手动触发**：点「立即扫描」扫一轮，并打印每题识别到的题型；点「诊断」输出完整题目结构（容器路径、题型、题干、无控件题的 HTML）——遇到识别问题时把这段截图反馈即可。
+- **在正确的页面使用**：AI 答题应在**真正的测验 / 作业 / 考试页**上运行。学习通的课程页（`studentstudy`）是一个**框架页**，里面充满了搜索框、LaTeX 公式弹窗、翻译框、验证码等输入框——脚本已内置规则把它们全部排除，绝不会误答；因此在该页面扫描会显示「识别题目 0 个」，这是正常的。请进入具体题目（章节测验 / 作业）后再扫描或诊断。诊断输出会标注每个文档是「疑似测验文档」还是「非测验文档（框架页，可忽略）」。
 - **范围限定**：本功能面向**视频中途题与章节测验**，不主动代提交作业与考试，规避风险。
 
 > 题库与 AI 答案仅供参考，请自行判断正确性；答题功能需在真实学习通页面验证题目选择器（页面结构可能随版本变化）。

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         学习通自动刷课脚本
 // @namespace    https://github.com/ZHE-you/Chaoxingxuexitong-ayto
-// @version      3.6.1
+// @version      3.6.2
 // @description  自动播放、自动切换下一节，并在页面结构异常时安全停止。单文件：可直接粘贴到浏览器控制台，也可导入 Tampermonkey。
 // @author       夏至子 (ZHE-you)
 // @homepageURL  https://github.com/ZHE-you/Chaoxingxuexitong-ayto
@@ -1113,17 +1113,28 @@
             // 浏览器直连大模型官方 API 通常被 CORS 拦截，请把 aiApiBase 设为
             // 你自建的中转代理（Cloudflare Worker / one-api / nginx 反代）地址。
 
+            // 收集所有可访问的文档（主文档 + 同域 iframe，递归到嵌套层）。
+            // 跨域 iframe 无法读取 contentDocument，会被自动跳过；用 href 去重避免循环。
             _getQuestionDocuments() {
-                const docs = [document];
-                try {
-                    document.querySelectorAll('iframe').forEach((f) => {
-                        try {
-                            const fd = f.contentDocument;
-                            if (fd && fd.location && fd.location.hostname === location.hostname) docs.push(fd);
-                        } catch (e) { /* 跨域 iframe 跳过 */ }
-                    });
-                } catch (e) {}
-                return docs;
+                const result = [];
+                const seen = new Set();
+                const visit = (doc, depth) => {
+                    if (!doc || !doc.querySelectorAll || depth > 3) return;
+                    result.push(doc);
+                    try {
+                        doc.querySelectorAll('iframe').forEach((f) => {
+                            try {
+                                const fd = f.contentDocument;
+                                if (!fd || !fd.location || !fd.location.href) return;
+                                if (seen.has(fd.location.href)) return;
+                                seen.add(fd.location.href);
+                                visit(fd, depth + 1);
+                            } catch (e) { /* 跨域 iframe 跳过 */ }
+                        });
+                    } catch (e) {}
+                };
+                visit(document, 0);
+                return result;
             },
 
             _loadAIBank() {
@@ -1804,6 +1815,22 @@
                 return idx < 26 ? String.fromCharCode(65 + idx) : '';
             },
 
+            // 判断控件是否位于「页面工具 / UI」容器内（搜索框、LaTeX 弹窗、翻译框、验证码等）。
+            // 这类输入框不应被当成题目作答。命中即返回 true。
+            _isInsideToolUI(el) {
+                const ph = (el.placeholder || '').toString();
+                const nm = (el.name || '').toString();
+                const id = (el.id || '').toString();
+                if (/search|captcha|verify|code|keyword|kwd|searchkey/i.test(ph + '|' + nm + '|' + id)) return true;
+                let n = el;
+                for (let i = 0; i < 8 && n; i++) {
+                    const cls = (n.className || '').toString();
+                    if (/latex-inline-pop|translationBox|trans-question-box|DySearch|dataSearch|Search|captcha|verifycode|code-img|AlertCon|search-box|searchBox|searchInput|header-search/i.test(cls)) return true;
+                    n = n.parentElement;
+                }
+                return false;
+            },
+
             // 收集所有可作答控件（跳过隐藏 / 禁用 / 只读）
             _collectAnswerControls(doc) {
                 const out = [];
@@ -1821,6 +1848,9 @@
                     try {
                         if (el.closest && el.closest('#xtControlPanel')) return;
                     } catch (err2) { /* ignore */ }
+                    // 排除页面工具 / UI 控件：搜索框、LaTeX 输入弹窗、翻译框、验证码等
+                    // （学习通 studentstudy 框架页里这类输入框极多，绝不能被当成填空题作答）
+                    if (this._isInsideToolUI(el)) return;
                     const isChoice = el.type === 'radio' || el.type === 'checkbox';
                     try {
                         const st = doc.defaultView && doc.defaultView.getComputedStyle ? doc.defaultView.getComputedStyle(el) : null;
@@ -1862,7 +1892,9 @@
                     if (!el || el === doc.body || el === doc.documentElement) break;
                     if (this._looksLikeQuestionBlock(el, doc)) return el;
                 }
-                return ctrl.parentElement || null;
+                // 找不到任何「像题目」的祖先块时，不再用父节点兜底——
+                // 否则框架页里的搜索框 / 验证码 / LaTeX 弹窗等孤立输入框会被误判成题目。
+                return null;
             },
 
             // 汇总一个文档里的题目块（含各自应有的控件），只保留最内层避免父子重复作答
@@ -2193,18 +2225,10 @@
                 } catch (err) { /* ignore */ }
                 console.log('iframe 数量：' + iframes.length);
                 iframes.forEach((t) => console.log('   - ' + t));
-                const stat = {};
-                try {
-                    document.querySelectorAll('input').forEach((el) => {
-                        const k = el.type || 'text';
-                        stat[k] = (stat[k] || 0) + 1;
-                    });
-                } catch (err) { /* ignore */ }
-                console.log('主文档 input 统计：' + JSON.stringify(stat));
-                console.log('可作答文档数（主文档 + 同域 iframe）：' + docs.length);
+                console.log('可访问文档数（主文档 + 同域 iframe，已递归）：' + docs.length);
+                let totalReal = 0, totalSuspect = 0;
                 docs.forEach((doc, di) => {
-                    let ctrls = [];
-                    let items = [];
+                    let ctrls = [], items = [];
                     try {
                         ctrls = this._collectAnswerControls(doc);
                         items = this._collectQuestionBlocks(doc);
@@ -2212,9 +2236,21 @@
                         console.warn('文档 #' + (di + 1) + ' 解析失败：' + err.message);
                         return;
                     }
-                    console.log('--- 文档 #' + (di + 1) + '：可作答控件 ' + ctrls.length + ' 个，识别题目 ' + items.length + ' 个 ---');
+                    // 是否像「测验文档」：整篇含题型标签（【填空题】等）才算
+                    let markerCount = 0;
+                    try {
+                        const m = doc.body && doc.body.innerHTML ? doc.body.innerHTML.match(/【\s*[^】]{1,8}\s*】/g) : null;
+                        markerCount = m ? m.length : 0;
+                    } catch (e) { /* ignore */ }
+                    const isQuiz = markerCount > 0;
+                    const label = doc === document ? '主文档' : ('iframe #' + di);
+                    console.log('--- 文档 #' + (di + 1) + '（' + label + '）：可作答控件 ' + ctrls.length + ' 个，识别题目 ' + items.length + ' 个；题型标签 ' + markerCount + ' 个 → ' + (isQuiz ? '疑似测验文档' : '非测验文档（框架页/内容页，可忽略）') + ' ---');
                     items.forEach((it, k) => {
                         const type = this._detectQuestionType(it.block, it.ctrls);
+                        const stem = this._getQuestionText(it.block);
+                        const real = !!stem && (TYPE_TAG_RE.test(stem) || /^\s*[（(]?\s*\d+\s*[)）．.、,，]/.test(stem));
+                        const suspicious = !real;
+                        if (real) totalReal++; else totalSuspect++;
                         const chain = [];
                         let el = it.block;
                         for (let d = 0; d < 4 && el && el.nodeType === 1; d++) {
@@ -2222,9 +2258,12 @@
                             chain.push(el.tagName.toLowerCase() + cls);
                             el = el.parentElement;
                         }
-                        console.log('#' + (k + 1) + ' [' + (TYPE_NAMES[type] || type) + '] 控件 ' + it.ctrls.length + ' 个');
-                        console.log('   路径: ' + chain.join('  <  '));
-                        console.log('   题干: ' + this._getQuestionText(it.block).slice(0, 100));
+                        const c0 = it.ctrls[0];
+                        const html = c0 ? (c0.outerHTML || '').replace(/\s+/g, ' ').slice(0, 220) : '';
+                        console.log((real ? '  ✅ ' : '  ⚠️ ') + '#' + (k + 1) + ' [' + (TYPE_NAMES[type] || type) + '] 控件 ' + it.ctrls.length + ' 个' + (suspicious ? '【可疑：题干为空或像工具】' : ''));
+                        console.log('     路径: ' + chain.join('  <  '));
+                        console.log('     题干: ' + stem.slice(0, 100));
+                        if (html) console.log('     控件HTML: ' + html);
                     });
                     try {
                         const un = this._collectUnanswerable(doc, items.map((it) => it.block));
@@ -2237,6 +2276,7 @@
                         }
                     } catch (err) { /* ignore */ }
                 });
+                console.log('汇总：真实题目 ' + totalReal + ' 个，可疑 ' + totalSuspect + ' 个');
                 console.log('%c======== 诊断结束（可截图此段反馈） ========', 'color:#673AB7;font-weight:bold');
                 return docs.length;
             },

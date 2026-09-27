@@ -55,7 +55,7 @@ function extractConst(name) {
 
 const METHODS = [
     '_blockText', '_getQuestionText', '_controlLabelText', '_inferLetter',
-    '_collectAnswerControls', '_looksLikeQuestionBlock', '_findQuestionBlock',
+    '_collectAnswerControls', '_isInsideToolUI', '_looksLikeQuestionBlock', '_findQuestionBlock',
     '_collectQuestionBlocks', '_collectUnanswerable', '_detectQuestionType', '_getOptions',
     '_setValue', '_answerChoice', '_splitFillAnswer', '_answerFill', '_answerContainer',
 ];
@@ -447,6 +447,37 @@ if (itemsH.length === 1) {
     const rs = winH.document.querySelectorAll('input[name=hq]');
     check('隐藏式单选仍能按字母选中', rs[1].checked && !rs[0].checked, '');
 }
+
+// ==================== 8. 回归：框架页误报（搜索框 / LaTeX 弹窗 / 翻译框 / 验证码） ====================
+console.log('\n=== 8. 回归测试（框架页工具控件误报） ===');
+
+// 复现用户真实页面诊断：studentstudy 框架页里充满了与答题无关的输入框，
+// 它们绝不能被当成「填空题」识别与作答。
+const winF = mount(`
+<div class="chapter"><div class="dataSearch_chapter"><div class="DySeleft fl">
+  <input type="text" id="f_search" placeholder="搜索本章内容">
+</div></div></div>
+<div class="AlertCon02"><div class="con03"><div class="DySearch">
+  <input type="text" id="f_captcha" placeholder="看不清">
+</div></div></div>
+<div class="edui-editor edui-default"><div class="latex-inline-pop">
+  <div class="latex-inline-pop-inner" contenteditable="true" id="f_latex">按ESC键完成输入</div>
+</div></div>
+<div class="translationBg"><div class="translationBox">
+  <div class="trans-question-box" contenteditable="true" id="f_trans">请翻译</div>
+</div></div>`);
+const itemsF = api._collectQuestionBlocks(winF.document);
+check('框架页的工具控件未被识别为题目（应当 0 道）', itemsF.length === 0, '实际 ' + itemsF.length);
+
+// 逐个确认这些控件确实被 _isInsideToolUI 拦截
+const fSearch = winF.document.getElementById('f_search');
+const fCaptcha = winF.document.getElementById('f_captcha');
+const fLatex = winF.document.getElementById('f_latex');
+const fTrans = winF.document.getElementById('f_trans');
+check('搜索框被识别为工具控件', api._isInsideToolUI(fSearch) === true, '');
+check('验证码输入框被识别为工具控件', api._isInsideToolUI(fCaptcha) === true, '');
+check('LaTeX 弹窗被识别为工具控件', api._isInsideToolUI(fLatex) === true, '');
+check('翻译框被识别为工具控件', api._isInsideToolUI(fTrans) === true, '');
 
 console.log('\n========================================');
 console.log(fail === 0 ? '全部通过：' + pass + ' 项' : '通过 ' + pass + ' 项，失败 ' + fail + ' 项');
