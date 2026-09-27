@@ -2,7 +2,7 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Node](https://img.shields.io/badge/node-%3E%3D20.11-brightgreen.svg)](https://nodejs.org)
-[![Version](https://img.shields.io/badge/version-3.5.0-orange.svg)](package.json)
+[![Version](https://img.shields.io/badge/version-3.6.0-orange.svg)](package.json)
 [![Build](https://github.com/ZHE-you/Chaoxingxuexitong-ayto/actions/workflows/verify.yml/badge.svg)](https://github.com/ZHE-you/Chaoxingxuexitong-ayto/actions/workflows/verify.yml)
 
 > ⚠️ **免责声明**：本项目仅用于脚本调试、前端自动化研究与页面行为分析，请遵守目标平台（学习通 / 超星）的使用规定，勿用于违规用途。因使用本脚本产生的任何后果由使用者自行承担。
@@ -256,9 +256,22 @@ app.configs.aiApiKey = ''; localStorage.removeItem('xtAi_apiKey');
 1. 在上游控制台给这个密钥设一个**较低的月度额度上限**，防止意外消耗
 2. **不要**把密钥写进任何会被 git 提交的文件（`wrangler.toml` 的 vars、`*.js` 源码里）
 3. 若曾经把密钥提交到 GitHub → 立即到上游控制台**吊销该密钥**（改代码救不回来，Git 历史仍在）
-- **手动触发**：点「立即扫描」可立刻扫一轮（调试用）。
-- **题型支持**：单选 / 判断 / 多选（自动点选选项）、填空 / 问答（填入文本）。匹配失败时控制台会打印题目与答案，便于手动修正后加入题库。
-- **范围限定**：本功能**只处理视频中途题与章节小测验**，不触碰作业与考试，规避风险。
+- **识别原理**：不依赖固定的 class 名（学习通各页面结构差异大、且随版本变化），而是**从作答控件反向锚定题目容器** —— 先收集页面中所有可作答控件，再向上寻找最近的、带题型标签（如 `【填空题】`）或题号（如 `1.`）的祖先元素作为题目边界。因此页面换皮改版后依然可用。
+- **支持的题型**（12 类，自动识别并按题型作答）
+
+| 题型 | 作答方式 |
+| --- | --- |
+| 单选题 / 听力题 | 按选项字母或选项文本点选 |
+| 多选题 | 同时选中全部正确选项 |
+| 判断题 | 按「对 / 错」文本，或按对应字母选中 |
+| 填空题 / 完型填空 | 多空按顺序分别填入（答案用 `\|` 分隔；`\|A\|` 这类数学符号已做保护，不会被误拆） |
+| 名词解释 / 简答题 / 论述题 | 要点写入文本框 |
+| 阅读理解 | 材料下的各小题分别作答 |
+| 分录题 | 借贷各栏按顺序填入 |
+| 排序题 / 连线题 | ⚠️ 属拖拽 / 点选交互，没有标准控件，脚本会**识别并提示需手动处理**，同时在控制台输出其 DOM 结构，便于后续适配 |
+
+- **手动触发**：点「立即扫描」扫一轮，并打印每题识别到的题型；点「诊断」输出完整题目结构（容器路径、题型、题干、无控件题的 HTML）——遇到识别问题时把这段截图反馈即可。
+- **范围限定**：本功能面向**视频中途题与章节测验**，不主动代提交作业与考试，规避风险。
 
 > 题库与 AI 答案仅供参考，请自行判断正确性；答题功能需在真实学习通页面验证题目选择器（页面结构可能随版本变化）。
 
@@ -298,9 +311,14 @@ app.configs.aiApiKey = ''; localStorage.removeItem('xtAi_apiKey');
 本仓库零运行时依赖（仅用 Node 内置模块），要求 **Node.js ≥ 20.11**。修改脚本后可用以下命令做语法校验：
 
 ```bash
-npm test            # 等价于 node tests/verify-v3.mjs
+npm test            # 语法校验（等价于 node tests/verify-v3.mjs）
+npm install         # 安装测试依赖 jsdom（仅测试需要，脚本本身零依赖）
+npm run test:quiz   # 题型识别与作答测试（jsdom 模拟真实页面 DOM，41 项断言）
 npm run proxy       # 启动本地 AI 答题中转代理（详见 proxy/README.md）
 ```
+
+`test:quiz` 覆盖 12 类题型的识别与作答、多空答案分配、`|A|` 数学符号保护、无控件题的降级处理，
+并用一组仿真页面做端到端验证。未安装 jsdom 时该测试会自动跳过，不影响 CI 其他步骤。
 
 CI（`.github/workflows/verify.yml`）在每次 push / PR 时自动执行该校验。
 

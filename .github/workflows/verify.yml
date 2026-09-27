@@ -18,5 +18,11 @@ jobs:
         with:
           node-version: "20"
 
-      - name: Verify single-file script
+      - name: Verify single-file script (syntax)
         run: node tests/verify-v3.mjs
+
+      - name: Install test dependencies
+        run: npm install --no-audit --no-fund
+
+      - name: Quiz recognition tests (jsdom)
+        run: node tests/quiz-recognition.test.mjs

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         学习通自动刷课脚本
 // @namespace    https://github.com/ZHE-you/Chaoxingxuexitong-ayto
-// @version      3.5.0
+// @version      3.6.0
 // @description  自动播放、自动切换下一节，并在页面结构异常时安全停止。单文件：可直接粘贴到浏览器控制台，也可导入 Tampermonkey。
 // @author       夏至子 (ZHE-you)
 // @homepageURL  https://github.com/ZHE-you/Chaoxingxuexitong-ayto
@@ -152,6 +152,35 @@
     }
 
     const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+    // ==================== 题型定义 ====================
+    // 学习通题干通常带【题型】标签，这是最可靠的结构锚点（不随 class 命名变化）。
+    const TYPE_TAG_RE = /【\s*[^】]{1,8}\s*】/;
+    // 标签文本 → 内部题型
+    const TYPE_LABELS = [
+        [/单选/, 'single'],
+        [/多选/, 'multiple'],
+        [/判断/, 'judge'],
+        [/完型填空|完形填空/, 'cloze'],
+        [/填空/, 'fill'],
+        [/名词解释/, 'term'],
+        [/听力/, 'listening'],
+        [/阅读|材料题?/, 'reading'],
+        [/简答|计算|分析|案例/, 'short'],
+        [/论述/, 'essay'],
+        [/分录/, 'entry'],
+        [/排序/, 'sort'],
+        [/连线|匹配/, 'match'],
+    ];
+    // 内部题型 → 中文名（用于给 AI 的提示与日志）
+    const TYPE_NAMES = {
+        single: '单选题', multiple: '多选题', judge: '判断题', fill: '填空题',
+        cloze: '完型填空题', term: '名词解释', listening: '听力题', reading: '阅读理解',
+        short: '简答题', essay: '论述题', entry: '分录题', sort: '排序题',
+        match: '连线题', unknown: '未知题型',
+    };
+    // 主观题（需要用文字作答，且答案可能含多个要点）
+    const SUBJECTIVE_TYPES = ['short', 'essay', 'term', 'entry', 'fill', 'cloze'];
 
     function waitForCoursePage() {
         let attempts = 0;
@@ -862,7 +891,8 @@
                         '<option value="custom">🔧 自定义接口（需代理）</option>' +
                         '<option value="auto">🔄 自动（官方优先+回落）</option>' +
                         '</select>' +
-                        '<div class="xt-row xt-btns"><button id="xtAiScan" class="xt-btn">立即扫描</button><button id="xtAiImport" class="xt-btn">导入题库</button><button id="xtAiExport" class="xt-btn">导出题库</button></div>' +
+                        '<div class="xt-row xt-btns"><button id="xtAiScan" class="xt-btn">立即扫描</button><button id="xtAiDiag" class="xt-btn">诊断</button></div>' +
+                        '<div class="xt-row xt-btns"><button id="xtAiImport" class="xt-btn">导入题库</button><button id="xtAiExport" class="xt-btn">导出题库</button></div>' +
                         '<details class="xt-ai-adv"><summary>⚡ 快速模式 / API 设置</summary>' +
                         '<label class="xt-ai-en"><input type="checkbox" id="xtFastVideo"> ⚡ 快速学时上报（免真实播放）</label>' +
                         '<select id="xtAiPreset" class="xt-sel">' +
@@ -971,9 +1001,9 @@
                 aiKey.addEventListener('change', saveAiCfg);
                 aiModel.addEventListener('change', saveAiCfg);
                 byId('xtAiScan').addEventListener('click', () => {
-                    const n = this._scanAndAnswer();
-                    console.log('%c[AI答题] 手动扫描完成，发现题目容器 ' + n + ' 个', 'color:#2196F3');
+                    this._scanAndAnswer(true);
                 });
+                byId('xtAiDiag').addEventListener('click', () => this._diagnose());
                 const fileInput = document.createElement('input');
                 fileInput.type = 'file';
                 fileInput.accept = '.json,application/json';
@@ -1480,8 +1510,9 @@
                 const p = await this._getOfficialAiParams();
                 let content = '题目：' + question;
                 if (options && options.length) content += '\n选项：' + options.join(' ／ ');
-                content += '\n请只返回答案本身：选择题或判断题返回正确选项的字母；多选题返回全部正确选项字母；' +
-                    '填空题返回应填的词或短语；问答题返回简短要点。不要解释，不要多余文字。';
+                content += '\n请严格按题型只返回答案本身，不要解释：选择题或判断题返回选项字母（多选给出全部字母）；' +
+                    '填空题与完型填空按空位的先后顺序给出各空答案、空与空之间用 | 分隔；' +
+                    '简答、论述、名词解释给出精炼要点、要点之间用 | 分隔；分录题每笔分录之间用 | 分隔。';
 
                 const body = [{
                     role: 'user',
@@ -1595,7 +1626,12 @@
 
             async _askAI(question, options) {
                 if (!this.configs.aiApiBase) throw new Error('未配置 API 地址（请填写中转代理地址，见 proxy/README.md）');
-                const sys = '你是学习通答题助手。只根据题目给出最简洁的答案：单选题/判断题直接给正确选项字母或内容；多选题给出所有正确选项；填空题给出应填的词或短语；问答题给出简短要点。不要解释、不要序号、不要多余文字。';
+                const sys = '你是学习通答题助手，严格按题型给出答案，不要解释、不要序号、不要多余文字。格式约定：' +
+                    '单选题返回正确选项字母（如 B）；多选题返回全部正确选项字母并连续写出（如 ACD）；' +
+                    '判断题返回“对”或“错”，或返回对应选项字母；填空题与完型填空按空位的先后顺序返回答案，多个空之间用 | 分隔（如 2|3）；' +
+                    '名词解释、简答题、论述题返回精炼要点，多个要点之间用 | 分隔；' +
+                    '分录题每笔分录一行，笔与笔之间用 | 分隔，保持“借：xx 金额 贷：xx 金额”的形式；' +
+                    '阅读理解按每一小题的先后顺序返回答案，小题之间用 | 分隔。';
                 let user = '题目：' + question;
                 if (options && options.length) user += '\n选项：' + options.join(' ／ ');
                 const body = {
@@ -1666,150 +1702,463 @@
                 return '';
             },
 
+            // ==================== 题目识别引擎 ====================
+            // 学习通各页面（章节测验 / 作业 / 考试 / 视频插入题）的 DOM 结构差异很大且随版本变化，
+            // 因此这里不依赖固定 class，而是「从作答控件反向锚定题目容器」：
+            // 先收集所有可作答控件，再向上找最近的、含题型标签（如【填空题】）或题号（如 1.）的
+            // 祖先元素作为题目边界。固定 class 仅作快速路径。
+            _blockText(el) {
+                if (!el) return '';
+                try {
+                    const clone = el.cloneNode(true);
+                    clone.querySelectorAll('input, textarea, select, button, script, style').forEach((n) => n.remove());
+                    return (clone.textContent || '').replace(/\s+/g, ' ').trim();
+                } catch (e) {
+                    return (el.textContent || '').replace(/\s+/g, ' ').trim();
+                }
+            },
+
+            // 题干：优先取已知标题节点，取不到就用「去掉选项区后的整块文本」
             _getQuestionText(qEl) {
                 const $q = $(qEl);
-                let t = $q.find('.qTitle, .question_title, .title, .stem, .topic-title, .questionText, .zuoye-topic-title, .TiMu_title, h3').first().text();
+                let t = $q.find('.qTitle, .question_title, .topic-title, .questionText, .zuoye-topic-title, .TiMu_title, .stem, h3, .title').first().text();
                 if (!t) t = $q.find('.qBord, .QBord, .question, .topic, .Zy_TItle').first().text();
-                if (!t) {
-                    const clone = $q.clone();
-                    clone.find('input, label, .option, .answerBg, ul.choices, .choices, .answer, textarea, button').remove();
-                    t = clone.text();
-                }
+                if (!t) t = this._blockText(qEl);
                 return (t || '').replace(/\s+/g, ' ').trim();
             },
 
-            _getOptions(qEl) {
-                const $q = $(qEl);
-                const opts = [];
-                const inputs = $q.find('input[type=radio], input[type=checkbox]');
-                if (inputs.length) {
-                    inputs.each(function () {
-                        const letter = ($(this).closest('li, label, .option, .answerBg, tr').find('.letter, .num, b').first().text() || '').trim();
-                        let text = '';
-                        const lab = $(this).closest('label');
-                        if (lab.length) text = lab.text();
-                        else text = $(this).parent().text();
-                        text = (text || '').replace(/\s+/g, ' ').trim();
-                        opts.push({ el: this, letter: letter, text: text, isInput: false });
-                    });
-                } else {
-                    $q.find('input[type=text], textarea, .input, [contenteditable]').each(function () {
-                        opts.push({ el: this, letter: '', text: '', isInput: true });
-                    });
-                }
-                return opts;
+            // 某个选项控件的标签文本
+            _controlLabelText(el) {
+                try {
+                    const lab = el.closest && el.closest('label');
+                    if (lab) {
+                        const t = this._blockText(lab);
+                        if (t) return t;
+                    }
+                    let p = el.parentElement;
+                    for (let i = 0; i < 3 && p; i++) {
+                        const t = this._blockText(p);
+                        if (t && t.length <= 200) return t;
+                        p = p.parentElement;
+                    }
+                } catch (e) { /* ignore */ }
+                return '';
             },
 
+            // 从选项文本推断字母（A/B/C/D…）；推不出则按序号映射
+            _inferLetter(label, idx) {
+                const s = String(label || '');
+                let m = s.match(/^\s*[（(]?\s*([A-Za-z])\s*[)）.、．:：]/);
+                if (m) return m[1].toUpperCase();
+                m = s.match(/^\s*([A-Za-z])\s+\S/);
+                if (m) return m[1].toUpperCase();
+                return idx < 26 ? String.fromCharCode(65 + idx) : '';
+            },
+
+            // 收集所有可作答控件（跳过隐藏 / 禁用 / 只读）
+            _collectAnswerControls(doc) {
+                const out = [];
+                if (!doc || !doc.querySelectorAll) return out;
+                let list = [];
+                try {
+                    list = doc.querySelectorAll('input[type=radio], input[type=checkbox], input[type=text], textarea, [contenteditable="true"], [contenteditable=""]');
+                } catch (e) {
+                    return out;
+                }
+                list.forEach((el) => {
+                    if (!el || el.disabled || el.readOnly) return;
+                    if (el.type === 'hidden') return;
+                    try {
+                        const st = doc.defaultView && doc.defaultView.getComputedStyle ? doc.defaultView.getComputedStyle(el) : null;
+                        if (st && (st.display === 'none' || st.visibility === 'hidden')) return;
+                    } catch (e) { /* ignore */ }
+                    out.push(el);
+                });
+                return out;
+            },
+
+            _looksLikeQuestionBlock(el, doc) {
+                if (!el || el.nodeType !== 1 || el === doc.body || el === doc.documentElement) return false;
+                let n = 0;
+                try {
+                    n = el.querySelectorAll('input[type=radio], input[type=checkbox], input[type=text], textarea').length;
+                } catch (e) { return false; }
+                if (n === 0 || n > 60) return false;   // 无控件，或大到像整卷容器
+                const txt = this._blockText(el).slice(0, 200);
+                if (TYPE_TAG_RE.test(txt)) return true;                             // 【填空题】
+                if (/^\s*[（(]?\s*\d+\s*[)）．.、,，]\s*\S/.test(txt)) return true;     // 1. / （1）
+                return false;
+            },
+
+            // 从控件向上找题目容器
+            // 注意：不能用 [class*="TiMu"] 这类子串匹配 —— 形如 .TiMu_cont 的「内容区」也会命中，
+            // 而它不含题干（题型标签丢失会导致题型误判）。这里要求候选块必须通过「像题目」校验。
+            _findQuestionBlock(ctrl, doc) {
+                const knownSel = '.TiMu, .questionLi, .questionBox, .qItem, .topic-item, .ans-job, .exam-question, .examPaper_subject, .question-panel, .question-item';
+                try {
+                    const direct = ctrl.closest ? ctrl.closest(knownSel) : null;
+                    if (direct && direct !== doc.body && this._looksLikeQuestionBlock(direct, doc)) return direct;
+                } catch (e) { /* ignore */ }
+                let el = ctrl;
+                for (let i = 0; i < 12 && el; i++) {
+                    el = el.parentElement;
+                    if (!el || el === doc.body || el === doc.documentElement) break;
+                    if (this._looksLikeQuestionBlock(el, doc)) return el;
+                }
+                return ctrl.parentElement || null;
+            },
+
+            // 汇总一个文档里的题目块（含各自应有的控件），只保留最内层避免父子重复作答
+            _collectQuestionBlocks(doc) {
+                const ctrls = this._collectAnswerControls(doc);
+                const map = new Map();
+                ctrls.forEach((c) => {
+                    const b = this._findQuestionBlock(c, doc);
+                    if (!b) return;
+                    if (!map.has(b)) map.set(b, []);
+                    map.get(b).push(c);
+                });
+                const blocks = Array.from(map.keys());
+                // 只保留最内层：若某块包含另一个题目块，说明它只是外层容器
+                return blocks
+                    .filter((b) => !blocks.some((o) => o !== b && b.contains(o)))
+                    .map((b) => ({ block: b, ctrls: map.get(b) }));
+            },
+
+            // 找出「带题型标签但没有任何标准作答控件」的题目块。
+            // 典型是排序题、连线题（用拖拽/点选交互，没有 input），
+            // 这类题无法自动作答，需要识别出来提示用户手动处理。
+            _collectUnanswerable(doc, knownBlocks) {
+                const known = knownBlocks || [];
+                let all = [];
+                try {
+                    all = doc.querySelectorAll('div, li, section, article, td, fieldset');
+                } catch (err) { return []; }
+                const cands = [];
+                all.forEach((el) => {
+                    // 已识别为可作答题目的块，以及它的内部节点与外层容器，都不算「无控件题」
+                    if (known.some((b) => b === el || b.contains(el) || el.contains(b))) return;
+                    const raw = el.textContent || '';
+                    if (!raw || raw.length > 600) return;      // 题块通常很短，超大块直接跳过
+                    const tag = (raw.match(TYPE_TAG_RE) || [''])[0];
+                    if (!tag) return;
+                    let isType = false;
+                    for (const pair of TYPE_LABELS) {
+                        if (pair[0].test(tag)) { isType = true; break; }
+                    }
+                    if (!isType) return;                       // 如【答题要求】这类非题型标签，忽略
+                    let n = 0;
+                    try { n = el.querySelectorAll('input, textarea, [contenteditable]').length; } catch (err2) { return; }
+                    if (n > 0) return;                         // 有控件说明能被自动作答
+                    cands.push(el);
+                });
+                return cands.filter((el) => !cands.some((c) => c !== el && el.contains(c)));
+            },
+
+            // 题型识别：题干标签优先，其次按控件类型与选项特征推断
+            _detectQuestionType(block, ctrls) {
+                const head = this._blockText(block).slice(0, 200);
+                const tag = (head.match(TYPE_TAG_RE) || [''])[0];
+                if (tag) {
+                    for (const pair of TYPE_LABELS) {
+                        if (pair[0].test(tag)) return pair[1];
+                    }
+                }
+                const brief = head.slice(0, 60);
+                for (const pair of TYPE_LABELS) {
+                    if (pair[0].test(brief)) return pair[1];
+                }
+                const hasCheckbox = ctrls.some((c) => c.type === 'checkbox');
+                const hasRadio = ctrls.some((c) => c.type === 'radio');
+                const hasText = ctrls.some((c) => c.tagName === 'TEXTAREA' || c.isContentEditable || (c.tagName === 'INPUT' && (c.type === 'text' || c.type === '')));
+                if (hasCheckbox) return 'multiple';
+                if (hasRadio) {
+                    const labels = ctrls.filter((c) => c.type === 'radio').map((c) => this._controlLabelText(c));
+                    // 只有明确的「对/错」式二元选项才判为判断题，避免把普通单选题误判
+                    if (labels.length === 2) {
+                        const joined = labels.join('')
+                            .replace(/[\s（()）.,．、,:：]/g, '')
+                            .replace(/^[A-Za-z](?=[\u4e00-\u9fa5])/g, '');
+                        if (/^(对|错|正确|错误|是|否|√|×|T|F|TRUE|FALSE)+$/i.test(joined)) return 'judge';
+                    }
+                    return 'single';
+                }
+                if (hasText) return 'fill';
+                return 'unknown';
+            },
+
+            // 兼容旧调用：返回选项数组（radio/checkbox 优先，否则为输入框）
+            _getOptions(qEl) {
+                const choice = [];
+                try {
+                    qEl.querySelectorAll('input[type=radio], input[type=checkbox]').forEach((el) => choice.push(el));
+                } catch (e) { /* ignore */ }
+                if (choice.length) {
+                    return choice.map((el, idx) => {
+                        const text = this._controlLabelText(el);
+                        return { el: el, letter: this._inferLetter(text, idx), text: text, isInput: false };
+                    });
+                }
+                const inputs = [];
+                try {
+                    qEl.querySelectorAll('input[type=text], textarea, [contenteditable="true"]').forEach((el) => inputs.push(el));
+                } catch (e) { /* ignore */ }
+                return inputs.map((el) => ({ el: el, letter: '', text: '', isInput: true }));
+            },
+
+            // 赋值：兼容 React / Vue 受控组件（绕开 value setter 再派发事件）
+            _setValue(el, val) {
+                const v = val === undefined || val === null ? '' : String(val);
+                try {
+                    if (el.isContentEditable) {
+                        el.textContent = v;
+                        el.dispatchEvent(new Event('input', { bubbles: true }));
+                        el.dispatchEvent(new Event('change', { bubbles: true }));
+                        return true;
+                    }
+                    const win = (el.ownerDocument && el.ownerDocument.defaultView) || window;
+                    const proto = el.tagName === 'TEXTAREA'
+                        ? (win.HTMLTextAreaElement && win.HTMLTextAreaElement.prototype)
+                        : (win.HTMLInputElement && win.HTMLInputElement.prototype);
+                    const desc = proto ? Object.getOwnPropertyDescriptor(proto, 'value') : null;
+                    if (desc && desc.set) desc.set.call(el, v);
+                    else el.value = v;
+                    el.dispatchEvent(new Event('input', { bubbles: true }));
+                    el.dispatchEvent(new Event('change', { bubbles: true }));
+                    try { el.dispatchEvent(new KeyboardEvent('keyup', { bubbles: true })); } catch (e) { /* ignore */ }
+                    return true;
+                } catch (e) {
+                    try { el.value = v; return true; } catch (e2) { return false; }
+                }
+            },
+
+            // 单选 / 多选 / 判断：按「选项字母」或「选项文本」匹配后点选
             _answerChoice(opts, answer) {
                 if (!answer) return false;
-                const ansLetters = (answer.match(/[A-Za-z]/g) || []).map(s => s.toUpperCase());
-                const ansClean = answer.replace(/[^一-龥A-Za-z0-9]/g, '').toUpperCase();
+                const ansUp = String(answer).toUpperCase();
+                const ansLetters = (ansUp.match(/[A-Z]/g) || []);
+                const ansClean = ansUp.replace(/[^0-9A-Z\u4e00-\u9fa5]/g, '');
+                const ansHasChinese = /[\u4e00-\u9fa5]/.test(ansUp);
+                const choice = opts.filter((o) => o.el && (o.el.type === 'radio' || o.el.type === 'checkbox'));
+                if (!choice.length) return false;
                 let selected = 0;
-                opts.forEach(o => {
-                    if (o.el.type !== 'radio' && o.el.type !== 'checkbox') return;
-                    const optLetter = (o.letter || '').replace(/[^A-Za-z]/g, '').toUpperCase();
-                    const optText = (o.text || '').replace(/\s+/g, '').toUpperCase();
+                choice.forEach((o) => {
+                    const optLetter = String(o.letter || '').replace(/[^A-Z]/g, '').toUpperCase();
+                    const optClean = String(o.text || '').replace(/[^0-9A-Z\u4e00-\u9fa5]/g, '').toUpperCase();
+                    const optBody = optClean.replace(/^[A-Z]/, '');   // 去掉选项字母前缀
                     let hit = false;
                     if (optLetter && ansLetters.indexOf(optLetter) !== -1) hit = true;
-                    else if (ansClean && optText && (optText.indexOf(ansClean) !== -1 || ansClean.indexOf(optText) !== -1)) hit = true;
+                    else if (ansHasChinese && optBody && ansClean && optBody.length <= ansClean.length && ansClean.indexOf(optBody) !== -1) hit = true;
+                    else if (ansHasChinese && optBody && ansClean.length >= 2 && optBody.indexOf(ansClean) !== -1) hit = true;
                     if (hit) {
-                        try { o.el.click(); selected++; } catch (e) {}
+                        try { o.el.click(); selected++; } catch (e) {
+                            try { o.el.checked = true; } catch (e2) { /* ignore */ }
+                        }
                     }
                 });
                 return selected > 0;
             },
 
+            // 把答案拆成多段：支持 | ; 换行 , 、 等分隔，供多空题按空分配
+            _splitFillAnswer(answer, n) {
+                const raw = String(answer || '').trim();
+                if (!raw) return [];
+                // 只有一个空位时整体填入，绝不做拆分（避免简答题答案被截断）
+                if (n <= 1) return [raw];
+                // 先用占位符保护成对的竖线（绝对值记号），如 |A|、|A^2-2A|、|x|
+                // 否则它们会被误当成多空答案的分隔符，导致答案被切断
+                const MARK = '\u0001';
+                const a = raw.replace(/\|([A-Za-z][^|]{0,12})\|/g, MARK + '$1' + MARK);
+                const trySplit = (s, re) => s.split(re).map((x) => x.trim()).filter((x) => x !== '');
+                let parts = trySplit(a, /\s*[|｜‖]\s*/);
+                if (parts.length < n) {
+                    const alt = trySplit(a, /\s*(?:;|；|\r?\n)\s*/);
+                    if (alt.length > parts.length) parts = alt;
+                }
+                if (parts.length < n) {
+                    const alt = trySplit(a, /\s*[,，、]\s*/);
+                    if (alt.length > parts.length) parts = alt;
+                }
+                if (parts.length > n) {
+                    const head = parts.slice(0, n - 1);
+                    head.push(parts.slice(n - 1).join('|'));
+                    parts = head;
+                } else if (n > 1 && parts.length === 1) {
+                    parts = new Array(n).fill(parts[0]);
+                }
+                return parts.map((x) => x.split(MARK).join('|'));
+            },
+
+            // 填空 / 完型 / 简答 / 论述 / 名词解释 / 分录：按空位依次填入
             _answerFill(opts, answer) {
+                const blanks = opts.filter((o) => o.isInput && o.el);
+                if (!blanks.length) return false;
+                const parts = this._splitFillAnswer(answer, blanks.length);
                 let ok = false;
-                opts.forEach(o => {
-                    if (!o.isInput) return;
-                    try {
-                        o.el.value = answer;
-                        o.el.dispatchEvent(new Event('input', { bubbles: true }));
-                        o.el.dispatchEvent(new Event('change', { bubbles: true }));
-                        ok = true;
-                    } catch (e) {}
+                blanks.forEach((o, i) => {
+                    const v = parts[i] !== undefined ? parts[i] : (parts.length ? parts[parts.length - 1] : answer);
+                    if (this._setValue(o.el, v)) ok = true;
                 });
                 return ok;
             },
 
-            _answerContainer(qEl) {
+            // 对单个题目容器作答：题库优先，未命中走 AI；按题型与实际控件类型分发作答
+            _answerContainer(qEl, type, ctrls) {
+                if (!type) {
+                    const own = ctrls || this._collectAnswerControls(qEl.ownerDocument || document);
+                    type = this._detectQuestionType(qEl, own);
+                }
                 const text = this._getQuestionText(qEl);
                 if (!text) return false;
-                const fp = text.slice(0, 60);
+                const fp = (type || 'unknown') + '|' + text.slice(0, 60);
                 if (this._aiHandled[fp]) return false;
                 this._aiHandled[fp] = true;
 
                 const opts = this._getOptions(qEl);
-                const hasChoice = opts.some(o => o.el.type === 'radio' || o.el.type === 'checkbox');
-                const isInput = opts.some(o => o.isInput);
+                const hasChoice = opts.some((o) => o.el && (o.el.type === 'radio' || o.el.type === 'checkbox'));
+                const isInput = opts.some((o) => o.isInput);
+                if (!hasChoice && !isInput) {
+                    // 排序 / 连线等特殊交互没有标准控件，留待人工处理
+                    console.warn('%c[AI答题] 该题缺少可作答控件（' + (TYPE_NAMES[type] || type) + '），跳过：' + text.slice(0, 40), 'color:#FF9800');
+                    return false;
+                }
 
-                const answer = this._lookupBank(text);
-                if (!answer) {
-                    // 只配了题库也可以答题，因此没有 AI 地址不再直接拦截
-                    if (this.configs.aiSource === 'custom' && !this.configs.aiApiBase && !this.configs.bankUrl) {
-                        console.warn('%c[AI答题] 题库未命中，且未配置自定义 API 地址 / 外部题库，跳过：' + fp, 'color:#FF9800');
-                        return false;
+                // 分发：优先按控件实际类型作答（题型只用于提示词与日志）
+                const apply = (ans) => {
+                    let ok = false;
+                    if (hasChoice) ok = this._answerChoice(opts, ans);
+                    if (!ok && isInput) ok = this._answerFill(opts, ans);
+                    return ok;
+                };
+                // 给 AI 的题目文本带上题型，便于模型按题型给出规范格式
+                const typeName = TYPE_NAMES[type] || '';
+                const aiQuestion = typeName ? (text + '\n（本题题型：' + typeName + '）') : text;
+
+                const banked = this._lookupBank(text);
+                if (banked) {
+                    if (apply(banked)) {
+                        this._aiStat.answered++;
+                        this._aiStat.lastResult = '题库:' + banked.slice(0, 30);
+                        console.log('%c[AI答题] 题库命中已作答（' + typeName + '）：' + text.slice(0, 40), 'color:#4CAF50');
+                        return true;
                     }
-                    const optTexts = opts.filter(o => !o.isInput).map(o => o.text);
-                    // 优先级：本地题库 → 外部题库 → AI（官方 / 自定义）
-                    const getAns = this.configs.bankUrl
-                        ? this._askBankApi(text, optTexts)
-                            .then((bankAns) => bankAns || this._resolveAnswer(text, optTexts))
-                        : this._resolveAnswer(text, optTexts);
-                    getAns.then(ans => {
-                        if (!ans) { this._aiStat.failed++; return; }
-                        let ok = false;
-                        if (hasChoice) ok = this._answerChoice(opts, ans);
-                        else if (isInput) ok = this._answerFill(opts, ans);
-                        else ok = this._answerChoice(opts, ans);
-                        if (ok) {
-                            this._aiStat.answered++;
-                            this._aiStat.lastResult = 'AI:' + ans.slice(0, 30);
-                            this._addToBank(text, ans);
-                            console.log('%c[AI答题] 已作答：' + fp + ' => ' + ans.slice(0, 40), 'color:#4CAF50');
-                        } else {
-                            this._aiStat.failed++;
-                            console.warn('%c[AI答题] 答案无法匹配到选项：' + fp + ' 答案=' + ans.slice(0, 40), 'color:#FF9800');
-                        }
-                    }).catch(e => {
-                        this._aiStat.failed++;
-                        console.error('%c[AI答题] 调用失败：' + fp + ' -> ' + e.message, 'color:#F44336');
-                    });
-                    return true;
+                    this._aiStat.failed++;
+                    console.warn('%c[AI答题] 题库答案无法填入：' + text.slice(0, 40) + ' 答案=' + banked.slice(0, 40), 'color:#FF9800');
+                    return false;
                 }
 
-                let ok = false;
-                if (hasChoice) ok = this._answerChoice(opts, answer);
-                else if (isInput) ok = this._answerFill(opts, answer);
-                else ok = this._answerChoice(opts, answer);
-                if (ok) {
-                    this._aiStat.answered++;
-                    this._aiStat.lastResult = '题库:' + answer.slice(0, 30);
-                    console.log('%c[AI答题] 题库命中已作答：' + fp, 'color:#4CAF50');
-                } else {
-                    this._aiStat.failed++;
-                    console.warn('%c[AI答题] 题库答案无法匹配：' + fp + ' 答案=' + answer.slice(0, 40), 'color:#FF9800');
+                // 只配了题库也能答题，因此没有 AI 地址不直接拦截
+                if (this.configs.aiSource === 'custom' && !this.configs.aiApiBase && !this.configs.bankUrl) {
+                    console.warn('%c[AI答题] 题库未命中，且未配置自定义 API / 外部题库，跳过：' + text.slice(0, 40), 'color:#FF9800');
+                    return false;
                 }
-                return ok;
+                const optTexts = opts.filter((o) => !o.isInput).map((o) => o.text);
+                // 优先级：本地题库 → 外部题库 → AI
+                const getAns = this.configs.bankUrl
+                    ? this._askBankApi(text, optTexts).then((bankAns) => bankAns || this._resolveAnswer(aiQuestion, optTexts))
+                    : this._resolveAnswer(aiQuestion, optTexts);
+                getAns.then((ans) => {
+                    if (!ans) { this._aiStat.failed++; return; }
+                    if (apply(ans)) {
+                        this._aiStat.answered++;
+                        this._aiStat.lastResult = 'AI:' + ans.slice(0, 30);
+                        this._addToBank(text, ans);
+                        console.log('%c[AI答题] 已作答（' + typeName + '）：' + text.slice(0, 40) + ' => ' + ans.slice(0, 40), 'color:#4CAF50');
+                    } else {
+                        this._aiStat.failed++;
+                        console.warn('%c[AI答题] 答案无法填入（' + typeName + '）：' + text.slice(0, 40) + ' 答案=' + ans.slice(0, 40), 'color:#FF9800');
+                    }
+                }).catch((e) => {
+                    this._aiStat.failed++;
+                    console.error('%c[AI答题] 调用失败：' + text.slice(0, 40) + ' -> ' + e.message, 'color:#F44336');
+                });
+                return true;
             },
 
-            _scanAndAnswer() {
+            _scanAndAnswer(verbose) {
                 const docs = this._getQuestionDocuments();
                 const seen = {};
                 let count = 0;
-                docs.forEach(doc => {
-                    if (!doc || !doc.querySelectorAll) return;
-                    const containers = doc.querySelectorAll('.questionBox, .questionLi, .qItem, .topic-item, .type1, .type2, .type3, .type4, .type5, .ans-job, .question-panel, .exam-question, .TiMu, .Zy_TItle, .examPaper_subject, .question, .qItem-box, .topic');
-                    containers.forEach(c => {
-                        const txt = this._getQuestionText(c);
+                let submitted = 0;
+                let manual = 0;
+                docs.forEach((doc) => {
+                    if (!doc) return;
+                    let items = [];
+                    try {
+                        items = this._collectQuestionBlocks(doc);
+                    } catch (e) {
+                        console.warn('%c[AI答题] 收集题目失败：' + e.message, 'color:#F44336');
+                        return;
+                    }
+                    items.forEach((it) => {
+                        const txt = this._getQuestionText(it.block);
                         if (!txt || seen[txt]) return;
                         seen[txt] = true;
                         count++;
-                        this._answerContainer(c);
+                        const type = this._detectQuestionType(it.block, it.ctrls);
+                        if (verbose) {
+                            console.log('%c[AI答题] 识别到「' + (TYPE_NAMES[type] || type) + '」控件 ' + it.ctrls.length + ' 个：' + txt.slice(0, 40), 'color:#607D8B');
+                        }
+                        if (this._answerContainer(it.block, type, it.ctrls)) submitted++;
                     });
+                    // 无标准控件的题目（排序 / 连线等）单独提示，避免用户以为脚本漏答
+                    try {
+                        this._collectUnanswerable(doc, items.map((it) => it.block)).forEach((el) => {
+                            const txt = this._getQuestionText(el).slice(0, 40);
+                            if (!txt || seen['NA|' + txt]) return;
+                            seen['NA|' + txt] = true;
+                            manual++;
+                            console.log('%c[AI答题] 该题没有标准作答控件，需手动处理：' + txt, 'color:#FF9800');
+                        });
+                    } catch (e) { /* ignore */ }
                 });
+                console.log('%c[AI答题] 扫描完成：识别题目 ' + count + ' 个，提交作答 ' + submitted + ' 个' +
+                    (manual ? '，需手动处理 ' + manual + ' 个' : ''), 'color:#2196F3');
                 return count;
+            },
+
+            // DOM 诊断：把识别过程与页面结构打印到控制台，便于在真实页面定位结构差异
+            _diagnose() {
+                const docs = this._getQuestionDocuments();
+                console.log('%c======== [AI答题] DOM 诊断开始 ========', 'color:#673AB7;font-weight:bold');
+                console.log('文档数（主文档 + 同域 iframe）：' + docs.length);
+                docs.forEach((doc, di) => {
+                    let ctrls = [];
+                    let items = [];
+                    try {
+                        ctrls = this._collectAnswerControls(doc);
+                        items = this._collectQuestionBlocks(doc);
+                    } catch (e) {
+                        console.warn('文档 #' + (di + 1) + ' 解析失败：' + e.message);
+                        return;
+                    }
+                    console.log('--- 文档 #' + (di + 1) + '：可作答控件 ' + ctrls.length + ' 个，识别题目 ' + items.length + ' 个 ---');
+                    items.forEach((it, k) => {
+                        const type = this._detectQuestionType(it.block, it.ctrls);
+                        const chain = [];
+                        let el = it.block;
+                        for (let d = 0; d < 4 && el && el.nodeType === 1; d++) {
+                            const cls = el.className ? '.' + String(el.className).trim().split(/\s+/).join('.') : '';
+                            chain.push(el.tagName.toLowerCase() + cls);
+                            el = el.parentElement;
+                        }
+                        console.log('#' + (k + 1) + ' [' + (TYPE_NAMES[type] || type) + '] 控件 ' + it.ctrls.length + ' 个');
+                        console.log('   路径: ' + chain.join('  <  '));
+                        console.log('   题干: ' + this._getQuestionText(it.block).slice(0, 100));
+                    });
+                    try {
+                        const un = this._collectUnanswerable(doc, items.map((it) => it.block));
+                        if (un.length) {
+                            console.log('   —— 以下 ' + un.length + ' 题无标准控件（排序 / 连线等，需适配）——');
+                            un.forEach((el) => {
+                                console.log('   [无控件] ' + this._getQuestionText(el).slice(0, 50));
+                                console.log('      HTML: ' + (el.innerHTML || '').replace(/\s+/g, ' ').slice(0, 260));
+                            });
+                        }
+                    } catch (e) { /* ignore */ }
+                });
+                console.log('%c======== 诊断结束（可截图此段反馈） ========', 'color:#673AB7;font-weight:bold');
+                return docs.length;
             },
 
             _aiTick() {
