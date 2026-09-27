@@ -2,7 +2,7 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Node](https://img.shields.io/badge/node-%3E%3D20.11-brightgreen.svg)](https://nodejs.org)
-[![Version](https://img.shields.io/badge/version-3.4.1-orange.svg)](package.json)
+[![Version](https://img.shields.io/badge/version-3.4.2-orange.svg)](package.json)
 [![Build](https://github.com/ZHE-you/Chaoxingxuexitong-ayto/actions/workflows/verify.yml/badge.svg)](https://github.com/ZHE-you/Chaoxingxuexitong-ayto/actions/workflows/verify.yml)
 
 > ⚠️ **免责声明**：本项目仅用于脚本调试、前端自动化研究与页面行为分析，请遵守目标平台（学习通 / 超星）的使用规定，勿用于违规用途。因使用本脚本产生的任何后果由使用者自行承担。
@@ -83,6 +83,22 @@ app.nextUnit();   // 手动切换到下一小节
 >
 > 若不想看到面板，可在控制台执行 `app.destroy()` 移除它（同时停止脚本）。
 
+## 🤖 AI 答题（题库优先 + AI 兜底）
+
+针对**视频中途插入题**与**章节小测验**，控制台面板里可开启自动答题。思路参考 [Mortal004/Xuexitong_shuake](https://github.com/Mortal004/Xuexitong_shuake)：先在本地题库检索，搜不到再调用大模型兜底。
+
+- **启用**：展开面板「🤖 AI 答题」→ 勾选「启用自动答题」。脚本每 2.5 秒扫描题目（主页面 + 同域 iframe），命中即答。
+- **题库优先**：用「导入题库」载入整理好的 `JSON`（`{"题目":"答案"}` 或 `[{"q":"...","a":"..."}]`）；答对/搜到的题会沉淀进「导出题库」，下次直接命中，省 token。题库经 `localStorage` 保存。
+- **AI 兜底**：题库未命中时把题目与选项发给大模型取答案。在「API 设置」里填：
+  - **API 地址**：OpenAI 兼容的 `/v1/chat/completions` 端点。⚠️ 官方 DeepSeek/OpenAI 接口默认禁止浏览器跨域，请填你自建的**中转代理**地址（Cloudflare Worker / one-api / nginx 反代）。
+  - **API Key**：你的密钥（明文存于本机 `localStorage`，仅本机使用，公共电脑慎用）。
+  - **模型名**：如 `deepseek-chat`（默认）。
+- **手动触发**：点「立即扫描」可立刻扫一轮（调试用）。
+- **题型支持**：单选 / 判断 / 多选（自动点选选项）、填空 / 问答（填入文本）。匹配失败时控制台会打印题目与答案，便于手动修正后加入题库。
+- **范围限定**：本功能**只处理视频中途题与章节小测验**，不触碰作业与考试，规避风险。
+
+> 题库与 AI 答案仅供参考，请自行判断正确性；答题功能需在真实学习通页面验证题目选择器（页面结构可能随版本变化）。
+
 ## ⚙️ 配置说明
 
 脚本顶部 `configs` 可调整行为（直接修改 `xuexitong.user.js` 后重新执行 / 重新导入即可）：
@@ -98,6 +114,10 @@ app.nextUnit();   // 手动切换到下一小节
 | `guardResumeCooldownMs` | `1500` | 恢复播放的冷却时间（毫秒） |
 | `autoAdvanceNoVideo` | `false` | 是否在无视频小节自动切换（默认关闭，安全起见） |
 | `muted` | `false` | 是否静音播放（控制台「静音播放」开关对应此值） |
+| `aiEnabled` | `false` | 是否启用 AI 自动答题 |
+| `aiApiBase` | `https://api.deepseek.com/v1/chat/completions` | 大模型接口地址（建议填中转代理，官方接口禁跨域） |
+| `aiApiKey` | `''` | 大模型 API Key（明文存本机 localStorage，公共电脑慎用） |
+| `aiModel` | `deepseek-chat` | 模型名 |
 
 将 `autoAdvanceNoVideo` 改为 `true` 可让脚本自动跳过无视频小节（请先确认课程结构安全）。
 

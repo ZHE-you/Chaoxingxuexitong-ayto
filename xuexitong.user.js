@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         学习通自动刷课脚本
 // @namespace    https://github.com/ZHE-you/Chaoxingxuexitong-ayto
-// @version      3.4.1
+// @version      3.4.2
 // @description  自动播放、自动切换下一节，并在页面结构异常时安全停止。单文件：可直接粘贴到浏览器控制台，也可导入 Tampermonkey。
 // @author       夏至子 (ZHE-you)
 // @homepageURL  https://github.com/ZHE-you/Chaoxingxuexitong-ayto
@@ -79,6 +79,10 @@
                 guardResumeCooldownMs: 1500,
                 autoAdvanceNoVideo: false,
                 muted: false,
+                aiEnabled: false,
+                aiApiBase: 'https://api.deepseek.com/v1/chat/completions',
+                aiApiKey: '',
+                aiModel: 'deepseek-chat',
             },
             _videoEl: null,
             _treeContainerEl: null,
@@ -86,6 +90,10 @@
             _userPaused: false,
             _started: false,
             _ui: null,
+            _qaBank: {},
+            _aiHandled: {},
+            _aiWatchTimer: null,
+            _aiStat: { answered: 0, failed: 0, lastResult: '' },
             _uiTimer: null,
             _currentRetryCount: 0,
             _checkInterval: null,
@@ -115,6 +123,8 @@
                 this._getVideoEl();
                 this._clearCheckInterval();
                 this._bindStepNavigation();
+                this._loadAIBank();
+                this._startAIWatch();
                 this.play();
             },
             nextUnit() {
@@ -586,6 +596,7 @@
                 this._detachVideoEvents();
                 if (this._delayedNextUnitTimer) clearTimeout(this._delayedNextUnitTimer);
                 if (this._uiTimer) { clearInterval(this._uiTimer); this._uiTimer = null; }
+                if (this._aiWatchTimer) { clearInterval(this._aiWatchTimer); this._aiWatchTimer = null; }
                 this._ui = null;
                 $(document).off('.xuexitongPlayerV3');
                 const panel = document.getElementById('xtControlPanel');
@@ -608,6 +619,10 @@
                         autoplay: ['xtCfg_autoplay', (v) => v === '1'],
                         autoAdvanceNoVideo: ['xtCfg_autoAdvanceNoVideo', (v) => v === '1'],
                         muted: ['xtCfg_muted', (v) => v === '1'],
+                        aiEnabled: ['xtAi_enabled', (v) => v === '1'],
+                        aiApiBase: ['xtAi_apiBase', (v) => v],
+                        aiApiKey: ['xtAi_apiKey', (v) => v],
+                        aiModel: ['xtAi_model', (v) => v],
                     };
                     for (const key in map) {
                         const [k, parse] = map[key];
@@ -622,7 +637,7 @@
             },
             _saveConfig(key, value) {
                 try {
-                    const store = { playbackRate: 'xtCfg_playbackRate', autoplay: 'xtCfg_autoplay', autoAdvanceNoVideo: 'xtCfg_autoAdvanceNoVideo', muted: 'xtCfg_muted' };
+                    const store = { playbackRate: 'xtCfg_playbackRate', autoplay: 'xtCfg_autoplay', autoAdvanceNoVideo: 'xtCfg_autoAdvanceNoVideo', muted: 'xtCfg_muted', aiEnabled: 'xtAi_enabled', aiApiBase: 'xtAi_apiBase', aiApiKey: 'xtAi_apiKey', aiModel: 'xtAi_model' };
                     localStorage.setItem(store[key], String(value));
                 } catch (e) {}
             },
@@ -682,6 +697,15 @@
 #xtControlPanel .xt-btn.xt-danger:hover{background:#fef2f2;}
 #xtControlPanel .xt-checks label{display:flex;align-items:center;gap:4px;font-size:12px;color:#444;flex:1;}
 #xtControlPanel .xt-tip{font-size:10px;color:#aaa;line-height:1.4;}
+#xtControlPanel details.xt-ai{margin:8px 0 4px;border-top:1px dashed #e0e0e0;padding-top:6px;}
+#xtControlPanel details.xt-ai>summary{cursor:pointer;font-size:12px;font-weight:600;color:#2563eb;outline:none;}
+#xtControlPanel .xt-ai-body{padding:6px 2px 0;}
+#xtControlPanel .xt-ai-en{display:flex;align-items:center;gap:4px;font-size:12px;color:#444;margin-bottom:6px;}
+#xtControlPanel .xt-ai-stat{font-size:11px;color:#888;margin-bottom:6px;word-break:break-all;}
+#xtControlPanel .xt-inp{width:100%;box-sizing:border-box;margin-bottom:5px;padding:5px;border:1px solid #d0d5dd;border-radius:6px;font-size:12px;}
+#xtControlPanel .xt-ai-body .xt-btn{margin-bottom:5px;}
+#xtControlPanel details.xt-ai-adv{margin-top:4px;}
+#xtControlPanel details.xt-ai-adv>summary{cursor:pointer;font-size:11px;color:#666;outline:none;}
 `;
                 const style = document.createElement('style');
                 style.textContent = css;
@@ -699,6 +723,17 @@
                         '<div class="xt-row xt-btns"><button id="xtRerun" class="xt-btn">重新运行</button><button id="xtStop" class="xt-btn xt-danger">停止</button></div>' +
                         '<div class="xt-row xt-checks"><label><input type="checkbox" id="xtAutoplay"> 自动播放</label><label><input type="checkbox" id="xtSkipNoVideo"> 无视频跳过</label></div>' +
                         '<div class="xt-row xt-checks"><label><input type="checkbox" id="xtMuted"> 静音播放</label></div>' +
+                        '<details class="xt-ai" open><summary>🤖 AI 答题（题库优先）</summary>' +
+                        '<div class="xt-ai-body">' +
+                        '<label class="xt-ai-en"><input type="checkbox" id="xtAiEnable"> 启用自动答题</label>' +
+                        '<div class="xt-ai-stat" id="xtAiStat">已答 0 · 失败 0</div>' +
+                        '<div class="xt-row xt-btns"><button id="xtAiScan" class="xt-btn">立即扫描</button><button id="xtAiImport" class="xt-btn">导入题库</button><button id="xtAiExport" class="xt-btn">导出题库</button></div>' +
+                        '<details class="xt-ai-adv"><summary>API 设置（需中转代理）</summary>' +
+                        '<input type="text" id="xtAiBase" class="xt-inp" placeholder="API 地址">' +
+                        '<input type="text" id="xtAiKey" class="xt-inp" placeholder="API Key">' +
+                        '<input type="text" id="xtAiModel" class="xt-inp" placeholder="模型名(默认 deepseek-chat)">' +
+                        '</details>' +
+                        '</div></details>' +
                         '<div class="xt-tip">倍速/静音即时生效；暂停后不再自动续播。配置自动保存。</div>' +
                     '</div>';
                 document.body.appendChild(panel);
@@ -717,6 +752,74 @@
                 autoplayCb.checked = !!this.configs.autoplay;
                 skipCb.checked = !!this.configs.autoAdvanceNoVideo;
                 muteCb.checked = !!this.configs.muted;
+
+                const aiEnableCb = byId('xtAiEnable');
+                const aiStatEl = byId('xtAiStat');
+                const aiBase = byId('xtAiBase');
+                const aiKey = byId('xtAiKey');
+                const aiModel = byId('xtAiModel');
+                aiEnableCb.checked = !!this.configs.aiEnabled;
+                aiBase.value = this.configs.aiApiBase;
+                aiKey.value = this.configs.aiApiKey;
+                aiModel.value = this.configs.aiModel;
+                aiEnableCb.addEventListener('change', () => {
+                    this.configs.aiEnabled = aiEnableCb.checked;
+                    this._saveConfig('aiEnabled', aiEnableCb.checked ? '1' : '0');
+                    if (aiEnableCb.checked) { this._loadAIBank(); this._startAIWatch(); }
+                });
+                const saveAiCfg = () => {
+                    this.configs.aiApiBase = aiBase.value.trim();
+                    this.configs.aiApiKey = aiKey.value.trim();
+                    this.configs.aiModel = aiModel.value.trim() || 'deepseek-chat';
+                    this._saveConfig('aiApiBase', this.configs.aiApiBase);
+                    this._saveConfig('aiApiKey', this.configs.aiApiKey);
+                    this._saveConfig('aiModel', this.configs.aiModel);
+                    console.log('%c[AI答题] API 配置已保存', 'color:#2196F3');
+                };
+                aiBase.addEventListener('change', saveAiCfg);
+                aiKey.addEventListener('change', saveAiCfg);
+                aiModel.addEventListener('change', saveAiCfg);
+                byId('xtAiScan').addEventListener('click', () => {
+                    const n = this._scanAndAnswer();
+                    console.log('%c[AI答题] 手动扫描完成，发现题目容器 ' + n + ' 个', 'color:#2196F3');
+                });
+                const fileInput = document.createElement('input');
+                fileInput.type = 'file';
+                fileInput.accept = '.json,application/json';
+                fileInput.style.display = 'none';
+                fileInput.addEventListener('change', () => {
+                    const f = fileInput.files && fileInput.files[0];
+                    if (!f) return;
+                    const reader = new FileReader();
+                    reader.onload = () => {
+                        try {
+                            const data = JSON.parse(reader.result);
+                            let added = 0;
+                            if (Array.isArray(data)) {
+                                data.forEach(it => { if (it && it.q) { this._qaBank[it.q] = it.a; added++; } });
+                            } else {
+                                for (const k in data) { this._qaBank[k] = data[k]; added++; }
+                            }
+                            this._saveAIBank();
+                            console.log('%c[AI答题] 题库导入成功，新增 ' + added + ' 条', 'color:#4CAF50');
+                        } catch (e) { console.error('%c[AI答题] 题库导入失败：' + e.message, 'color:#F44336'); }
+                    };
+                    reader.readAsText(f);
+                });
+                document.body.appendChild(fileInput);
+                byId('xtAiImport').addEventListener('click', () => fileInput.click());
+                byId('xtAiExport').addEventListener('click', () => {
+                    try {
+                        const blob = new Blob([JSON.stringify(this._qaBank || {}, null, 2)], { type: 'application/json' });
+                        const url = URL.createObjectURL(blob);
+                        const a = document.createElement('a');
+                        a.href = url; a.download = 'xuexitong_qa_bank.json';
+                        document.body.appendChild(a);
+                        a.click();
+                        setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 1000);
+                        console.log('%c[AI答题] 题库已导出', 'color:#4CAF50');
+                    } catch (e) {}
+                });
 
                 speed.addEventListener('input', () => {
                     const v = parseFloat(speed.value);
@@ -754,7 +857,7 @@
 
                 this._makeDraggable(panel, panel.querySelector('.xt-header'));
 
-                this._ui = { stateEl, infoEl };
+                this._ui = { stateEl, infoEl, aiStatEl };
                 this._updateStatus();
                 this._uiTimer = setInterval(() => this._updateStatus(), 800);
             },
@@ -767,7 +870,242 @@
                 stateEl.textContent = state;
                 const cd = this._cellData;
                 infoEl.textContent = '第' + (cd.currentCellIndex + 1) + '章 第' + (cd.currentNCellIndex + 1) + '节 · ' + (cd.currentVideoTitle || '—');
+                if (this._ui.aiStatEl) {
+                    this._ui.aiStatEl.textContent = '已答 ' + this._aiStat.answered + ' · 失败 ' + this._aiStat.failed + (this._aiStat.lastResult ? ' · ' + this._aiStat.lastResult : '');
+                }
             },
+            // ===== AI 答题模块（题库优先 + AI 兜底）=====
+            // 适用范围：视频中途插入题、章节小测验。（不含作业/考试）
+            // 浏览器直连大模型官方 API 通常被 CORS 拦截，请把 aiApiBase 设为
+            // 你自建的中转代理（Cloudflare Worker / one-api / nginx 反代）地址。
+
+            _getQuestionDocuments() {
+                const docs = [document];
+                try {
+                    document.querySelectorAll('iframe').forEach((f) => {
+                        try {
+                            const fd = f.contentDocument;
+                            if (fd && fd.location && fd.location.hostname === location.hostname) docs.push(fd);
+                        } catch (e) { /* 跨域 iframe 跳过 */ }
+                    });
+                } catch (e) {}
+                return docs;
+            },
+
+            _loadAIBank() {
+                try {
+                    const raw = localStorage.getItem('xtQA_bank');
+                    this._qaBank = raw ? JSON.parse(raw) : {};
+                } catch (e) { this._qaBank = {}; }
+                if (!this._qaBank || typeof this._qaBank !== 'object') this._qaBank = {};
+            },
+            _saveAIBank() {
+                try { localStorage.setItem('xtQA_bank', JSON.stringify(this._qaBank || {})); } catch (e) {}
+            },
+            _lookupBank(q) {
+                if (!this._qaBank) return null;
+                q = (q || '').trim();
+                if (!q) return null;
+                if (this._qaBank[q]) return this._qaBank[q];
+                for (const key in this._qaBank) {
+                    if (!key) continue;
+                    if (q.indexOf(key) !== -1 || key.indexOf(q) !== -1) return this._qaBank[key];
+                }
+                return null;
+            },
+            _addToBank(q, a) {
+                if (!q || !a) return;
+                q = q.trim(); a = String(a).trim();
+                if (!this._qaBank) this._qaBank = {};
+                if (!this._qaBank[q]) {
+                    this._qaBank[q] = a;
+                    this._saveAIBank();
+                    console.log('%c[AI答题] 已加入题库：' + q.slice(0, 30), 'color:#8BC34A');
+                }
+            },
+
+            async _askAI(question, options) {
+                if (!this.configs.aiApiKey) throw new Error('未配置 API Key（请在控制台面板 API 设置中填写）');
+                const sys = '你是学习通答题助手。只根据题目给出最简洁的答案：单选题/判断题直接给正确选项字母或内容；多选题给出所有正确选项；填空题给出应填的词或短语；问答题给出简短要点。不要解释、不要序号、不要多余文字。';
+                let user = '题目：' + question;
+                if (options && options.length) user += '\n选项：' + options.join(' ／ ');
+                const body = {
+                    model: this.configs.aiModel || 'deepseek-chat',
+                    messages: [
+                        { role: 'system', content: sys },
+                        { role: 'user', content: user }
+                    ],
+                    temperature: 0.2,
+                };
+                const resp = await fetch(this.configs.aiApiBase, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': 'Bearer ' + this.configs.aiApiKey,
+                    },
+                    body: JSON.stringify(body),
+                });
+                if (!resp.ok) {
+                    const txt = await resp.text().catch(() => '');
+                    throw new Error('AI 接口返回 ' + resp.status + '：' + txt.slice(0, 160));
+                }
+                const data = await resp.json().catch(() => null);
+                let ans = data && data.choices && data.choices[0] && data.choices[0].message ? data.choices[0].message.content : '';
+                return (ans || '').trim();
+            },
+
+            _getQuestionText(qEl) {
+                const $q = $(qEl);
+                let t = $q.find('.qTitle, .question_title, .title, .stem, .topic-title, .questionText, .zuoye-topic-title, .TiMu_title, h3').first().text();
+                if (!t) t = $q.find('.qBord, .QBord, .question, .topic, .Zy_TItle').first().text();
+                if (!t) {
+                    const clone = $q.clone();
+                    clone.find('input, label, .option, .answerBg, ul.choices, .choices, .answer, textarea, button').remove();
+                    t = clone.text();
+                }
+                return (t || '').replace(/\s+/g, ' ').trim();
+            },
+
+            _getOptions(qEl) {
+                const $q = $(qEl);
+                const opts = [];
+                const inputs = $q.find('input[type=radio], input[type=checkbox]');
+                if (inputs.length) {
+                    inputs.each(function () {
+                        const letter = ($(this).closest('li, label, .option, .answerBg, tr').find('.letter, .num, b').first().text() || '').trim();
+                        let text = '';
+                        const lab = $(this).closest('label');
+                        if (lab.length) text = lab.text();
+                        else text = $(this).parent().text();
+                        text = (text || '').replace(/\s+/g, ' ').trim();
+                        opts.push({ el: this, letter: letter, text: text, isInput: false });
+                    });
+                } else {
+                    $q.find('input[type=text], textarea, .input, [contenteditable]').each(function () {
+                        opts.push({ el: this, letter: '', text: '', isInput: true });
+                    });
+                }
+                return opts;
+            },
+
+            _answerChoice(opts, answer) {
+                if (!answer) return false;
+                const ansLetters = (answer.match(/[A-Za-z]/g) || []).map(s => s.toUpperCase());
+                const ansClean = answer.replace(/[^一-龥A-Za-z0-9]/g, '').toUpperCase();
+                let selected = 0;
+                opts.forEach(o => {
+                    if (o.el.type !== 'radio' && o.el.type !== 'checkbox') return;
+                    const optLetter = (o.letter || '').replace(/[^A-Za-z]/g, '').toUpperCase();
+                    const optText = (o.text || '').replace(/\s+/g, '').toUpperCase();
+                    let hit = false;
+                    if (optLetter && ansLetters.indexOf(optLetter) !== -1) hit = true;
+                    else if (ansClean && optText && (optText.indexOf(ansClean) !== -1 || ansClean.indexOf(optText) !== -1)) hit = true;
+                    if (hit) {
+                        try { o.el.click(); selected++; } catch (e) {}
+                    }
+                });
+                return selected > 0;
+            },
+
+            _answerFill(opts, answer) {
+                let ok = false;
+                opts.forEach(o => {
+                    if (!o.isInput) return;
+                    try {
+                        o.el.value = answer;
+                        o.el.dispatchEvent(new Event('input', { bubbles: true }));
+                        o.el.dispatchEvent(new Event('change', { bubbles: true }));
+                        ok = true;
+                    } catch (e) {}
+                });
+                return ok;
+            },
+
+            _answerContainer(qEl) {
+                const text = this._getQuestionText(qEl);
+                if (!text) return false;
+                const fp = text.slice(0, 60);
+                if (this._aiHandled[fp]) return false;
+                this._aiHandled[fp] = true;
+
+                const opts = this._getOptions(qEl);
+                const hasChoice = opts.some(o => o.el.type === 'radio' || o.el.type === 'checkbox');
+                const isInput = opts.some(o => o.isInput);
+
+                const answer = this._lookupBank(text);
+                if (!answer) {
+                    if (!this.configs.aiApiKey) {
+                        console.warn('%c[AI答题] 题库未命中且未配置 API Key，跳过：' + fp, 'color:#FF9800');
+                        return false;
+                    }
+                    const optTexts = opts.filter(o => !o.isInput).map(o => o.text);
+                    this._askAI(text, optTexts).then(ans => {
+                        if (!ans) { this._aiStat.failed++; return; }
+                        let ok = false;
+                        if (hasChoice) ok = this._answerChoice(opts, ans);
+                        else if (isInput) ok = this._answerFill(opts, ans);
+                        else ok = this._answerChoice(opts, ans);
+                        if (ok) {
+                            this._aiStat.answered++;
+                            this._aiStat.lastResult = 'AI:' + ans.slice(0, 30);
+                            this._addToBank(text, ans);
+                            console.log('%c[AI答题] 已作答：' + fp + ' => ' + ans.slice(0, 40), 'color:#4CAF50');
+                        } else {
+                            this._aiStat.failed++;
+                            console.warn('%c[AI答题] 答案无法匹配到选项：' + fp + ' 答案=' + ans.slice(0, 40), 'color:#FF9800');
+                        }
+                    }).catch(e => {
+                        this._aiStat.failed++;
+                        console.error('%c[AI答题] 调用失败：' + fp + ' -> ' + e.message, 'color:#F44336');
+                    });
+                    return true;
+                }
+
+                let ok = false;
+                if (hasChoice) ok = this._answerChoice(opts, answer);
+                else if (isInput) ok = this._answerFill(opts, answer);
+                else ok = this._answerChoice(opts, answer);
+                if (ok) {
+                    this._aiStat.answered++;
+                    this._aiStat.lastResult = '题库:' + answer.slice(0, 30);
+                    console.log('%c[AI答题] 题库命中已作答：' + fp, 'color:#4CAF50');
+                } else {
+                    this._aiStat.failed++;
+                    console.warn('%c[AI答题] 题库答案无法匹配：' + fp + ' 答案=' + answer.slice(0, 40), 'color:#FF9800');
+                }
+                return ok;
+            },
+
+            _scanAndAnswer() {
+                const docs = this._getQuestionDocuments();
+                const seen = {};
+                let count = 0;
+                docs.forEach(doc => {
+                    if (!doc || !doc.querySelectorAll) return;
+                    const containers = doc.querySelectorAll('.questionBox, .questionLi, .qItem, .topic-item, .type1, .type2, .type3, .type4, .type5, .ans-job, .question-panel, .exam-question, .TiMu, .Zy_TItle, .examPaper_subject, .question, .qItem-box, .topic');
+                    containers.forEach(c => {
+                        const txt = this._getQuestionText(c);
+                        if (!txt || seen[txt]) return;
+                        seen[txt] = true;
+                        count++;
+                        this._answerContainer(c);
+                    });
+                });
+                return count;
+            },
+
+            _aiTick() {
+                if (!this.configs.aiEnabled) return;
+                try { this._scanAndAnswer(); } catch (e) {
+                    console.error('%c[AI答题] 扫描异常：' + e.message, 'color:#F44336');
+                }
+            },
+
+            _startAIWatch() {
+                if (this._aiWatchTimer) clearInterval(this._aiWatchTimer);
+                this._aiWatchTimer = setInterval(() => this._aiTick(), 2500);
+            },
+
             _makeDraggable(panel, handle) {
                 let sx = 0, sy = 0, ox = 0, oy = 0, dragging = false;
                 handle.addEventListener('mousedown', (e) => {
