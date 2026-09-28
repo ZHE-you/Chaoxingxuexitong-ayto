@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         学习通自动刷课脚本
 // @namespace    https://github.com/ZHE-you/Chaoxingxuexitong-ayto
-// @version      3.8.0
+// @version      3.9.0
 // @description  自动播放、自动切换下一节，并在页面结构异常时安全停止。单文件：可直接粘贴到浏览器控制台，也可导入 Tampermonkey。
 // @author       夏至子 (ZHE-you)
 // @homepageURL  https://github.com/ZHE-you/Chaoxingxuexitong-ayto
@@ -765,7 +765,7 @@ var XT_UI = (() => {
 
   // src/ui/panel.js
   var PANEL_CSS = `
-#xtControlPanel{position:fixed;top:16px;right:16px;z-index:2147483647;width:268px;max-height:calc(100vh - 32px);display:flex;flex-direction:column;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'PingFang SC','Microsoft YaHei',Helvetica,Arial,sans-serif;font-size:13px;line-height:1.5;color:#1f2937;background:#fff;border:1px solid #e5e7eb;border-radius:12px;box-shadow:0 10px 30px rgba(15,23,42,.16);user-select:none;overflow:hidden;}
+#xtControlPanel{position:fixed;top:16px;right:16px;z-index:2147483647;width:288px;max-height:calc(100vh - 32px);display:flex;flex-direction:column;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'PingFang SC','Microsoft YaHei',Helvetica,Arial,sans-serif;font-size:13px;line-height:1.5;color:#1f2937;background:#fff;border:1px solid #e5e7eb;border-radius:12px;box-shadow:0 10px 30px rgba(15,23,42,.16);user-select:none;overflow:hidden;}
 #xtControlPanel,#xtControlPanel *,#xtControlPanel *::before,#xtControlPanel *::after{box-sizing:border-box;margin:0;padding:0;}
 #xtControlPanel .xt-header{flex:0 0 auto;display:flex;align-items:center;justify-content:space-between;gap:8px;padding:9px 12px;background:linear-gradient(135deg,#3b82f6,#2563eb);color:#fff;cursor:move;font-weight:600;letter-spacing:.2px;}
 #xtControlPanel .xt-header>span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
@@ -777,6 +777,19 @@ var XT_UI = (() => {
 #xtControlPanel .xt-body::-webkit-scrollbar-thumb:hover{background:#9ca3af;}
 #xtControlPanel.xt-collapsed{max-height:none;}
 #xtControlPanel.xt-collapsed .xt-body{display:none;}
+/* \u6807\u7B7E\u9875\uFF08\u7EAF CSS\uFF09 */
+#xtControlPanel .xt-tabradio{position:absolute;width:1px;height:1px;opacity:0;pointer-events:none;}
+#xtControlPanel .xt-tabbar{display:flex;gap:2px;border-bottom:1px solid #eef0f3;margin-bottom:10px;}
+#xtControlPanel .xt-tab{flex:1;text-align:center;font-size:12px;color:#6b7280;padding:7px 4px;cursor:pointer;border-bottom:2px solid transparent;transition:color .15s,border-color .15s;white-space:nowrap;}
+#xtControlPanel .xt-tab:hover{color:#2563eb;}
+#xtTabCtrl:checked ~ .xt-tabbar label[for="xtTabCtrl"],
+#xtTabAi:checked ~ .xt-tabbar label[for="xtTabAi"],
+#xtTabAbout:checked ~ .xt-tabbar label[for="xtTabAbout"]{color:#2563eb;font-weight:600;border-bottom-color:#2563eb;}
+#xtControlPanel .xt-pane{display:none;}
+#xtTabCtrl:checked ~ .xt-panes .xt-pane-ctrl,
+#xtTabAi:checked ~ .xt-panes .xt-pane-ai,
+#xtTabAbout:checked ~ .xt-panes .xt-pane-about{display:block;}
+/* \u5206\u533A\u5361\u7247 */
 #xtControlPanel .xt-sec{padding:8px;border:1px solid #eef0f3;border-radius:9px;margin-bottom:8px;background:#fcfdff;}
 #xtControlPanel .xt-sec:last-child{margin-bottom:0;}
 #xtControlPanel .xt-status{font-size:12px;color:#4b5563;margin-bottom:2px;}
@@ -799,38 +812,51 @@ var XT_UI = (() => {
 #xtControlPanel .xt-checks label{display:flex;align-items:center;gap:5px;font-size:12px;color:#4b5563;flex:1 1 auto;}
 #xtControlPanel input[type=checkbox]{accent-color:#2563eb;cursor:pointer;}
 #xtControlPanel .xt-tip{font-size:10px;color:#9ca3af;line-height:1.5;}
-#xtControlPanel details.xt-ai>summary{cursor:pointer;font-size:12px;font-weight:600;color:#2563eb;outline:none;list-style:none;}
-#xtControlPanel details.xt-ai>summary::-webkit-details-marker{display:none;}
-#xtControlPanel details.xt-ai>summary::after{content:'\\25BE';float:right;color:#93c5fd;transition:transform .15s;}
-#xtControlPanel details.xt-ai[open]>summary::after{transform:rotate(180deg);}
-#xtControlPanel .xt-ai-body{padding-top:8px;}
+#xtControlPanel details.xt-ai-adv>summary{cursor:pointer;font-size:11px;color:#6b7280;outline:none;list-style:none;}
+#xtControlPanel details.xt-ai-adv>summary::-webkit-details-marker{display:none;}
+#xtControlPanel details.xt-ai-adv>summary::after{content:'\\25BE';float:right;color:#cbd5e1;transition:transform .15s;}
+#xtControlPanel details.xt-ai-adv[open]>summary::after{transform:rotate(180deg);}
+#xtControlPanel details.xt-ai-adv[open]>summary{margin-bottom:8px;}
 #xtControlPanel .xt-ai-en{display:flex;align-items:center;gap:5px;font-size:12px;color:#4b5563;margin-bottom:6px;}
 #xtControlPanel .xt-ai-stat{font-size:11px;color:#9ca3af;margin-bottom:6px;word-break:break-all;}
 #xtControlPanel .xt-inp{width:100%;margin-bottom:5px;padding:6px 8px;border:1px solid #d0d5dd;border-radius:7px;font-size:12px;background:#fff;color:#1f2937;outline:none;}
 #xtControlPanel .xt-inp:focus{border-color:#2563eb;box-shadow:0 0 0 2px rgba(37,99,235,.12);}
-#xtControlPanel .xt-ai-body .xt-btn{margin-bottom:5px;}
-#xtControlPanel details.xt-ai-adv{margin-top:6px;border-top:1px dashed #e5e7eb;padding-top:6px;}
-#xtControlPanel details.xt-ai-adv>summary{cursor:pointer;font-size:11px;color:#6b7280;outline:none;}
 #xtControlPanel .xt-sel{width:100%;margin:3px 0;padding:5px 7px;border:1px solid #d0d7de;border-radius:7px;font-size:11px;background:#fff;color:#1f2937;outline:none;}
 #xtControlPanel .xt-sel:focus{border-color:#2563eb;}
+#xtControlPanel .xt-about-title{font-size:12px;font-weight:600;color:#374151;margin-bottom:6px;}
+#xtControlPanel .xt-about-list{padding-left:16px;}
+#xtControlPanel .xt-about-list li{font-size:11px;color:#6b7280;line-height:1.75;}
+#xtControlPanel .xt-about-list code{background:#eef2f7;padding:0 4px;border-radius:3px;font-size:10px;color:#2563eb;}
+#xtControlPanel .xt-about-list strong{color:#374151;}
 `;
   var PANEL_HTML = `
 <div class="xt-header"><span>\u5B66\u4E60\u901A\u5237\u8BFE\u63A7\u5236\u53F0</span><button class="xt-min" title="\u6536\u8D77/\u5C55\u5F00">\u2014</button></div>
 <div class="xt-body">
-  <div class="xt-sec">
-    <div class="xt-status">\u72B6\u6001\uFF1A<b id="xtState">\u7A7A\u95F2</b></div>
-    <div class="xt-info" id="xtInfo">\u2014</div>
+  <input type="radio" name="xtTab" id="xtTabCtrl" class="xt-tabradio" checked>
+  <input type="radio" name="xtTab" id="xtTabAi" class="xt-tabradio">
+  <input type="radio" name="xtTab" id="xtTabAbout" class="xt-tabradio">
+  <div class="xt-tabbar">
+    <label class="xt-tab" for="xtTabCtrl">\u63A7\u5236</label>
+    <label class="xt-tab" for="xtTabAi">AI \u7B54\u9898</label>
+    <label class="xt-tab" for="xtTabAbout">\u5173\u4E8E</label>
   </div>
-  <div class="xt-sec">
-    <div class="xt-row xt-speed"><label>\u64AD\u653E\u500D\u901F <span id="xtSpeedVal">1.5</span>x</label><input type="range" id="xtSpeed" min="0.5" max="4" step="0.5" value="1.5"></div>
-    <div class="xt-row xt-btns"><button id="xtPlay" class="xt-btn xt-primary">\u5F00\u59CB</button><button id="xtPause" class="xt-btn">\u6682\u505C</button><button id="xtNext" class="xt-btn">\u4E0B\u4E00\u8282</button></div>
-    <div class="xt-row xt-btns"><button id="xtRerun" class="xt-btn">\u91CD\u65B0\u8FD0\u884C</button><button id="xtStop" class="xt-btn xt-danger">\u505C\u6B62</button></div>
-    <div class="xt-row xt-checks"><label><input type="checkbox" id="xtAutoplay"> \u81EA\u52A8\u64AD\u653E</label><label><input type="checkbox" id="xtSkipNoVideo"> \u65E0\u89C6\u9891\u8DF3\u8FC7</label></div>
-    <div class="xt-row xt-checks"><label><input type="checkbox" id="xtMuted"> \u9759\u97F3\u64AD\u653E</label></div>
-  </div>
-  <div class="xt-sec">
-    <details class="xt-ai" open><summary>\u{1F916} AI \u7B54\u9898\uFF08\u9898\u5E93\u4F18\u5148\uFF09</summary>
-      <div class="xt-ai-body">
+  <div class="xt-panes">
+    <section class="xt-pane xt-pane-ctrl">
+      <div class="xt-sec">
+        <div class="xt-status">\u72B6\u6001\uFF1A<b id="xtState">\u7A7A\u95F2</b></div>
+        <div class="xt-info" id="xtInfo">\u2014</div>
+      </div>
+      <div class="xt-sec">
+        <div class="xt-row xt-speed"><label>\u64AD\u653E\u500D\u901F <span id="xtSpeedVal">1.5</span>x</label><input type="range" id="xtSpeed" min="0.5" max="4" step="0.5" value="1.5"></div>
+        <div class="xt-row xt-btns"><button id="xtPlay" class="xt-btn xt-primary">\u5F00\u59CB</button><button id="xtPause" class="xt-btn">\u6682\u505C</button><button id="xtNext" class="xt-btn">\u4E0B\u4E00\u8282</button></div>
+        <div class="xt-row xt-btns"><button id="xtRerun" class="xt-btn">\u91CD\u65B0\u8FD0\u884C</button><button id="xtStop" class="xt-btn xt-danger">\u505C\u6B62</button></div>
+        <div class="xt-row xt-checks"><label><input type="checkbox" id="xtAutoplay"> \u81EA\u52A8\u64AD\u653E</label><label><input type="checkbox" id="xtSkipNoVideo"> \u65E0\u89C6\u9891\u8DF3\u8FC7</label></div>
+        <div class="xt-row xt-checks"><label><input type="checkbox" id="xtMuted"> \u9759\u97F3\u64AD\u653E</label></div>
+      </div>
+      <div class="xt-tip">\u500D\u901F/\u9759\u97F3\u5373\u65F6\u751F\u6548\uFF1B\u6682\u505C\u540E\u4E0D\u518D\u81EA\u52A8\u7EED\u64AD\u3002\u914D\u7F6E\u81EA\u52A8\u4FDD\u5B58\u3002</div>
+    </section>
+    <section class="xt-pane xt-pane-ai">
+      <div class="xt-sec">
         <label class="xt-ai-en"><input type="checkbox" id="xtAiEnable"> \u542F\u7528\u81EA\u52A8\u7B54\u9898</label>
         <div class="xt-ai-stat" id="xtAiStat">\u5DF2\u7B54 0 \xB7 \u5931\u8D25 0</div>
         <select id="xtAiSource" class="xt-sel">
@@ -840,7 +866,9 @@ var XT_UI = (() => {
         </select>
         <div class="xt-row xt-btns"><button id="xtAiScan" class="xt-btn">\u7ACB\u5373\u626B\u63CF</button><button id="xtAiDiag" class="xt-btn">\u8BCA\u65AD</button></div>
         <div class="xt-row xt-btns"><button id="xtAiImport" class="xt-btn">\u5BFC\u5165\u9898\u5E93</button><button id="xtAiExport" class="xt-btn">\u5BFC\u51FA\u9898\u5E93</button></div>
-        <details class="xt-ai-adv"><summary>\u26A1 \u5FEB\u901F\u6A21\u5F0F / API \u8BBE\u7F6E</summary>
+      </div>
+      <div class="xt-sec">
+        <details class="xt-ai-adv" open><summary>\u26A1 \u5FEB\u901F\u6A21\u5F0F / API \u8BBE\u7F6E</summary>
           <label class="xt-ai-en"><input type="checkbox" id="xtFastVideo"> \u26A1 \u5FEB\u901F\u5B66\u65F6\u4E0A\u62A5\uFF08\u514D\u771F\u5B9E\u64AD\u653E\uFF09</label>
           <select id="xtAiPreset" class="xt-sel">
             <option value="">\u2014 \u670D\u52A1\u5546\u5FEB\u901F\u586B\u5145 \u2014</option>
@@ -860,9 +888,20 @@ var XT_UI = (() => {
           <div class="xt-tip">\u{1F512} \u63A8\u8350\u628A\u771F\u5B9E\u5BC6\u94A5\u5199\u5728\u4EE3\u7406\u7684\u73AF\u5883\u53D8\u91CF / .env \u91CC\uFF0C\u6B64\u5904\u7559\u7A7A\u5373\u53EF\u2014\u2014\u8FD9\u6837\u5BC6\u94A5\u4E0D\u4F1A\u5B58\u5728\u6D4F\u89C8\u5668\u4E2D\u3002</div>
         </details>
       </div>
-    </details>
+    </section>
+    <section class="xt-pane xt-pane-about">
+      <div class="xt-sec">
+        <div class="xt-about-title">\u4F7F\u7528\u63D0\u793A</div>
+        <ul class="xt-about-list">
+          <li>AI \u7B54\u9898\u9700\u5728<strong>\u771F\u6B63\u7684\u6D4B\u9A8C / \u4F5C\u4E1A / \u8003\u8BD5\u9875</strong>\u4F7F\u7528\uFF1B\u8BFE\u7A0B\u6846\u67B6\u9875\u626B\u63CF\u663E\u793A 0 \u9898\u5C5E\u6B63\u5E38\u3002</li>
+          <li>\u9898\u5E93\u4F18\u5148\uFF1A\u547D\u4E2D\u672C\u5730 / \u5916\u90E8\u9898\u5E93\u5219\u4E0D\u6D88\u8017 AI\u3002</li>
+          <li>\u5B98\u65B9 AI \u8DE8\u57DF\uFF1A\u628A\u811A\u672C\u5934\u90E8 <code>@grant</code> \u6539\u4E3A <code>GM_xmlhttpRequest</code> \u5373\u53EF\u3002</li>
+          <li>\u5BC6\u94A5\u63A8\u8350\u5199\u5728\u4EE3\u7406\u7684 <code>.env</code>\uFF0C\u9762\u677F\u7559\u7A7A\u6700\u5B89\u5168\u3002</li>
+        </ul>
+      </div>
+      <div class="xt-tip">\u672C\u9879\u76EE\u4EC5\u4F9B\u5B66\u4E60\u4E0E\u524D\u7AEF\u81EA\u52A8\u5316\u7814\u7A76\uFF0C\u8BF7\u9075\u5B88\u5E73\u53F0\u4F7F\u7528\u89C4\u5B9A\u3002</div>
+    </section>
   </div>
-  <div class="xt-tip">\u500D\u901F/\u9759\u97F3\u5373\u65F6\u751F\u6548\uFF1B\u6682\u505C\u540E\u4E0D\u518D\u81EA\u52A8\u7EED\u64AD\u3002\u914D\u7F6E\u81EA\u52A8\u4FDD\u5B58\u3002</div>
 </div>
 `;
   return __toCommonJS(index_exports);
