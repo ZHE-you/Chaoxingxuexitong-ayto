@@ -7,14 +7,11 @@
  *
  * 未安装 jsdom 时脚本会优雅跳过（退出码 0），保证 CI 不因缺少可选依赖而失败。
  */
-import fs from 'node:fs';
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
+// 直接以 src/core 为被测来源：识别引擎已从单文件迁移为独立模块，不再需要用括号配对从源码抠方法。
+import { createEngineMethods } from '../src/core/engine.js';
 
 const require = createRequire(import.meta.url);
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const SCRIPT = path.join(__dirname, '..', 'xuexitong.user.js');
 
 let JSDOM;
 try {
@@ -24,54 +21,9 @@ try {
     process.exit(0);
 }
 
-// ==================== 从脚本源码提取被测方法 ====================
-const src = fs.readFileSync(SCRIPT, 'utf8');
-
-function extractMethod(name) {
-    let idx = src.indexOf('async ' + name + '(');
-    if (idx < 0) idx = src.indexOf('            ' + name + '(');
-    if (idx < 0) throw new Error('未找到方法 ' + name);
-    let i = src.indexOf('{', idx), depth = 0, end = -1;
-    for (let j = i; j < src.length; j++) {
-        const ch = src[j];
-        if (ch === '{') depth++;
-        else if (ch === '}') { depth--; if (depth === 0) { end = j + 1; break; } }
-    }
-    return src.slice(idx, end);
-}
-
-function extractConst(name) {
-    const idx = src.indexOf('const ' + name);
-    if (idx < 0) throw new Error('未找到常量 ' + name);
-    let i = src.indexOf('=', idx), depth = 0, end = -1;
-    for (let j = i; j < src.length; j++) {
-        const ch = src[j];
-        if (ch === '[' || ch === '{') depth++;
-        else if (ch === ']' || ch === '}') depth--;
-        else if (ch === ';' && depth === 0) { end = j + 1; break; }
-    }
-    return src.slice(idx, end);
-}
-
-const METHODS = [
-    '_blockText', '_getQuestionText', '_controlLabelText', '_inferLetter',
-    '_collectAnswerControls', '_isInsideToolUI', '_looksLikeQuestionBlock', '_findQuestionBlock',
-    '_collectQuestionBlocks', '_collectUnanswerable', '_detectQuestionType', '_getOptions',
-    '_setValue', '_answerChoice', '_splitFillAnswer', '_answerFill', '_answerContainer',
-];
-
-function buildApi() {
-    const body = [
-        extractConst('TYPE_TAG_RE'),
-        extractConst('TYPE_LABELS'),
-        extractConst('TYPE_NAMES'),
-        'return {' + METHODS.map(extractMethod).join(',') + '};',
-    ].join('\n');
-    return new Function(body)();
-}
-
 // ==================== 测试环境 ====================
-const api = buildApi();
+// src/core/engine.js 的 createEngineMethods() 返回识别/作答方法（内部以 this 访问上下文）。
+const api = createEngineMethods();
 api.configs = {};
 
 // 极简 jQuery 桩：脚本里 _getQuestionText 会先尝试用 $ 找标题节点

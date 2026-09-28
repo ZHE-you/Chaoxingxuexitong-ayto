@@ -18,11 +18,17 @@ jobs:
         with:
           node-version: "20"
 
-      - name: Verify single-file script (syntax)
-        run: node tests/verify-v3.mjs
-
-      - name: Install test dependencies
+      - name: Install dependencies
         run: npm install --no-audit --no-fund
+
+      - name: Build single-file userscript from src/
+        run: npm run build
+
+      - name: Verify build output (syntax + engine injected + dist consistent)
+        run: node tests/verify-v3.mjs
 
       - name: Quiz recognition tests (jsdom)
         run: node tests/quiz-recognition.test.mjs
+
+      - name: Build smoke test (engine injected at runtime)
+        run: node tests/build-smoke.test.mjs

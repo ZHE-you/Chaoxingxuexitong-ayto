@@ -2,7 +2,7 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Node](https://img.shields.io/badge/node-%3E%3D20.11-brightgreen.svg)](https://nodejs.org)
-[![Version](https://img.shields.io/badge/version-3.6.2-orange.svg)](package.json)
+[![Version](https://img.shields.io/badge/version-3.7.0-orange.svg)](package.json)
 [![Build](https://github.com/ZHE-you/Chaoxingxuexitong-ayto/actions/workflows/verify.yml/badge.svg)](https://github.com/ZHE-you/Chaoxingxuexitong-ayto/actions/workflows/verify.yml)
 
 > ⚠️ **免责声明**：本项目仅用于脚本调试、前端自动化研究与页面行为分析，请遵守目标平台（学习通 / 超星）的使用规定，勿用于违规用途。因使用本脚本产生的任何后果由使用者自行承担。
@@ -27,11 +27,22 @@
 
 ## 📁 目录结构
 
+工程采用「**开发期多模块 → 构建期打包为单文件**」：源码在 `src/`，`xuexitong.user.js` 与 `dist/` 是构建产物。
+
 ```text
 .
-├── xuexitong.user.js     # 唯一脚本文件：控制台 + 油猴通用
+├── src/                  # 模块化源码（团队协作层，详见 src/README.md）
+│   ├── core/                 # 核心引擎：题型识别 + 作答（已迁移）
+│   ├── template.user.js      # 构建模板：存量代码 + 构建标记位
+│   └── README.md             # 模块地图 / 迁移进度 / 协作约定
+├── build.mjs             # 构建脚本：src → 单文件（esbuild-wasm，无原生依赖）
+├── xuexitong.user.js     # 【构建产物】单文件脚本：控制台 + 油猴通用（供 @updateURL 拉取）
+├── dist/
+│   └── xuexitong.user.js # 【构建产物】同上（规范输出位置）
 ├── tests/
-│   └── verify-v3.mjs     # 语法校验（node --check）
+│   ├── verify-v3.mjs             # 产物校验（语法 + 引擎已注入 + dist 一致）
+│   ├── quiz-recognition.test.mjs # 题型识别与作答（jsdom，50 项断言）
+│   └── build-smoke.test.mjs      # 构建产物冒烟（真实加载并验证引擎注入）
 ├── proxy/                # AI 答题中转代理（解决浏览器跨域 + 隐藏 Key）
 │   ├── README.md             # 部署与使用说明
 │   ├── local-proxy.mjs       # 本地 Node 版（零依赖，npm run proxy）
@@ -39,14 +50,13 @@
 │   └── wrangler.toml         # Worker 部署配置模板
 ├── img/                  # 文档截图与赞赏码
 ├── archive/              # 历史版本（v2 / 旧版）及旧文档
-│   ├── v2.js
-│   ├── xuexitong.js
-│   └── README_v2.md
 ├── ISSUES_REVIEW.md      # 历史 issue 复盘与优化记录
 ├── package.json
 ├── LICENSE
-└── .github/workflows/    # CI：单文件语法校验
+└── .github/workflows/    # CI：构建 → 产物校验 → 单元测试 → 冒烟测试
 ```
+
+> ⚠️ `xuexitong.user.js` 与 `dist/` 均为**生成物**，请勿直接编辑；改动请改 `src/` 后运行 `npm run build`。
 
 ## 🚀 使用方法
 
@@ -327,19 +337,23 @@ app.configs.aiApiKey = ''; localStorage.removeItem('xtAi_apiKey');
 
 ## 🔧 校验
 
-本仓库零运行时依赖（仅用 Node 内置模块），要求 **Node.js ≥ 20.11**。修改脚本后可用以下命令做语法校验：
+脚本本身**零运行时依赖**（分发的单文件不含任何 npm 依赖），要求 **Node.js ≥ 20.11**；构建与测试仅需 devDependencies。
 
 ```bash
-npm test            # 语法校验（等价于 node tests/verify-v3.mjs）
-npm install         # 安装测试依赖 jsdom（仅测试需要，脚本本身零依赖）
-npm run test:quiz   # 题型识别与作答测试（jsdom 模拟真实页面 DOM，41 项断言）
+npm install         # 安装 devDependencies（esbuild-wasm 构建 + jsdom 测试）
+npm run build       # 由 src/ 构建单文件 → xuexitong.user.js 与 dist/xuexitong.user.js
+npm run verify      # 一条命令：构建 + 产物校验 + 单元测试 + 冒烟测试
+npm run test:quiz   # 题型识别与作答测试（jsdom 模拟真实页面 DOM，50 项断言）
+npm run test:smoke  # 构建产物冒烟：真实加载并验证引擎注入
+npm test            # 产物校验（语法 + 引擎已注入 + dist 与根目录一致）
 npm run proxy       # 启动本地 AI 答题中转代理（详见 proxy/README.md）
 ```
 
-`test:quiz` 覆盖 12 类题型的识别与作答、多空答案分配、`|A|` 数学符号保护、无控件题的降级处理，
-并用一组仿真页面做端到端验证。未安装 jsdom 时该测试会自动跳过，不影响 CI 其他步骤。
+`test:quiz` 覆盖 12 类题型的识别与作答、多空答案分配、`|A|` 数学符号保护、无控件题降级、框架页误报过滤，
+并以一组仿真页面做端到端验证；测试直接 `import` `src/core` 模块，不再依赖从单文件里抠方法。
+未安装 jsdom 时相关测试会自动跳过，不影响 CI 其他步骤。
 
-CI（`.github/workflows/verify.yml`）在每次 push / PR 时自动执行该校验。
+CI（`.github/workflows/verify.yml`）在每次 push / PR 时自动执行：构建 → 产物校验 → 单元测试 → 冒烟测试。
 
 ## ❓ 常见问题
 

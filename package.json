@@ -1,6 +1,6 @@
 {
   "name": "xuexitong-autostudy-script",
-  "version": "3.6.2",
+  "version": "3.7.0",
   "description": "学习通自动刷课脚本 V3 稳定版：自动播放视频、自动切换下一小节，并在页面结构异常时安全停止。",
   "type": "module",
   "repository": {
@@ -12,11 +12,15 @@
     "url": "https://github.com/ZHE-you/Chaoxingxuexitong-ayto/issues"
   },
   "scripts": {
+    "build": "node build.mjs",
     "test": "node tests/verify-v3.mjs",
     "test:quiz": "node tests/quiz-recognition.test.mjs",
+    "test:smoke": "node tests/build-smoke.test.mjs",
+    "verify": "node build.mjs && node tests/verify-v3.mjs && node tests/quiz-recognition.test.mjs && node tests/build-smoke.test.mjs",
     "proxy": "node proxy/local-proxy.mjs"
   },
   "devDependencies": {
+    "esbuild-wasm": "^0.28.2",
     "jsdom": "^30.1.1"
   },
   "engines": {
