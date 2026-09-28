@@ -413,6 +413,7 @@ export function createEngineMethods() {
                 let count = 0;
                 let submitted = 0;
                 let manual = 0;
+                let obfuscated = 0;
                 docs.forEach((doc) => {
                     if (!doc) return;
                     let items = [];
@@ -436,17 +437,85 @@ export function createEngineMethods() {
                     // 无标准控件的题目（排序 / 连线等）单独提示，避免用户以为脚本漏答
                     try {
                         this._collectUnanswerable(doc, items.map((it) => it.block)).forEach((el) => {
-                            const txt = this._getQuestionText(el).slice(0, 40);
+                            const stem = this._getQuestionText(el);
+                            const txt = stem.slice(0, 40);
                             if (!txt || seen['NA|' + txt]) return;
                             seen['NA|' + txt] = true;
                             manual++;
-                            console.log('%c[AI答题] 该题没有标准作答控件，需手动处理：' + txt, 'color:#FF9800');
+                            if (this._looksObfuscated(stem)) {
+                                obfuscated++;
+                                console.warn('%c[AI答题] 该题文字疑似「字体加密」（乱码），无法识别：' + txt, 'color:#FF9800');
+                            } else {
+                                console.log('%c[AI答题] 该题没有标准作答控件，需手动处理：' + txt, 'color:#FF9800');
+                            }
                         });
                     } catch (e) { /* ignore */ }
                 });
                 console.log('%c[AI答题] 扫描完成：识别题目 ' + count + ' 个，提交作答 ' + submitted + ' 个' +
-                    (manual ? '，需手动处理 ' + manual + ' 个' : ''), 'color:#2196F3');
+                    (manual ? '，需手动处理 ' + manual + ' 个' : '') +
+                    (obfuscated ? '（其中 ' + obfuscated + ' 个疑似「字体加密」，请点「诊断」查看 @font-face）' : ''), 'color:#2196F3');
                 return count;
+            },
+
+            // 扫描文档里的 @font-face（学习通的「字体反爬」会把题目正文换成自定义字体）。
+            // 返回 [{family, kind, preview}]，kind 为 base64嵌入 / URL / unknown。
+            _findFontFaces(doc) {
+                const out = [];
+                try {
+                    const sheets = doc.styleSheets || [];
+                    for (let i = 0; i < sheets.length; i++) {
+                        let rules = null;
+                        try { rules = sheets[i].cssRules; } catch (e) { continue; } // 跨域样式表读不到
+                        if (!rules) continue;
+                        for (let j = 0; j < rules.length; j++) {
+                            const r = rules[j];
+                            const type = r.type;
+                            const isFace = type === 5 || (r.constructor && r.constructor.name === 'CSSFontFaceRule');
+                            if (!isFace) continue;
+                            const style = r.style;
+                            const src = (style && style.getPropertyValue && style.getPropertyValue('src')) || r.cssText || '';
+                            let kind = 'unknown', preview = String(src).slice(0, 160);
+                            if (/data:/i.test(src)) {
+                                const m = src.match(/data:([^;,]+)/i);
+                                kind = 'base64嵌入(' + (m ? m[1] : '') + ')';
+                                preview = 'data:…（共 ' + src.length + ' 字符）';
+                            } else if (/url\(/i.test(src)) {
+                                const m = src.match(/url\((['"]?)([^'")]+)\1\)/i);
+                                kind = 'URL';
+                                preview = m ? m[2].slice(0, 200) : preview;
+                            }
+                            const fam = (style && style.getPropertyValue && style.getPropertyValue('font-family')) || r.fontFamily || '';
+                            out.push({ family: fam, kind, preview });
+                        }
+                    }
+                } catch (e) { /* ignore */ }
+                return out;
+            },
+
+            // 启发式判断一段文字是否被「字体反爬」加密：
+            // 学习通把常用字替换成一批冷僻字，这些冷僻字高度集中在少数区间且密集出现。
+            _looksObfuscated(text) {
+                const s = String(text || '');
+                if (s.length < 8) return false;
+                const rare = /[\u3400-\u4DBF\u5C90-\u5D30\u7F50-\u7F60\u9FA6-\u9FFF]/g;
+                const m = s.match(rare);
+                const n = m ? m.length : 0;
+                return n >= 3 && n / s.length > 0.15;
+            },
+
+            // 简要描述一个元素的直接子节点（tag.class），并标出疑似「选项 / 可点击」的元素。
+            _describeChildren(el) {
+                const items = [];
+                try {
+                    const kids = el.children || [];
+                    for (let i = 0; i < kids.length && i < 12; i++) {
+                        const k = kids[i];
+                        const cls = k.className ? '.' + String(k.className).trim().split(/\s+/).slice(0, 3).join('.') : '';
+                        const clickable = !!(k.onclick) || /option|answer|choice|radio|select|item|topic|TiMu|ans/i.test(String(k.className || ''));
+                        items.push(k.tagName.toLowerCase() + cls + (clickable ? '★' : ''));
+                    }
+                } catch (e) { /* ignore */ }
+                return items.join('  ');
             },
 
             // DOM 诊断：把识别过程与页面结构打印到控制台，便于在真实页面定位结构差异
@@ -488,6 +557,20 @@ export function createEngineMethods() {
                     const isQuiz = markerCount > 0;
                     const label = doc === document ? '主文档' : ('iframe #' + di);
                     console.log('--- 文档 #' + (di + 1) + '（' + label + '）：可作答控件 ' + ctrls.length + ' 个，识别题目 ' + items.length + ' 个；题型标签 ' + markerCount + ' 个 → ' + (isQuiz ? '疑似测验文档' : '非测验文档（框架页/内容页，可忽略）') + ' ---');
+                    // 字体反爬检测（学习通常把题目正文换成自定义字体，DOM 文本因此变成乱码）
+                    const faces = this._findFontFaces(doc);
+                    if (faces.length) {
+                        console.log('   ⚠️ 检测到 @font-face ' + faces.length + ' 个（可能是字体反爬）：');
+                        faces.forEach((f, fi) => console.log('      [' + (fi + 1) + '] family=' + (f.family || '(空)') + '  来源=' + f.kind + '  ' + f.preview));
+                        let probe = items.length ? items[0].block : null;
+                        if (!probe) { try { probe = doc.querySelector('.TiMu, .questionLi, .question, [class*="TiMu"]'); } catch (e) {} }
+                        if (probe) {
+                            let ff = '';
+                            try { ff = ((doc.defaultView || window).getComputedStyle(probe).fontFamily) || ''; } catch (e) {}
+                            console.log('      题块计算字体 font-family: ' + ff);
+                        }
+                        console.log('      → 若题干显示为乱码，说明正文被字体加密，须先「字体解密」才能识别。');
+                    }
                     items.forEach((it, k) => {
                         const type = this._detectQuestionType(it.block, it.ctrls);
                         const stem = this._getQuestionText(it.block);
@@ -506,15 +589,21 @@ export function createEngineMethods() {
                         console.log((real ? '  ✅ ' : '  ⚠️ ') + '#' + (k + 1) + ' [' + (TYPE_NAMES[type] || type) + '] 控件 ' + it.ctrls.length + ' 个' + (suspicious ? '【可疑：题干为空或像工具】' : ''));
                         console.log('     路径: ' + chain.join('  <  '));
                         console.log('     题干: ' + stem.slice(0, 100));
+                        if (this._looksObfuscated(stem)) console.log('     ⚠️ 该题干疑似「字体加密」（乱码），需要字体解密后才有正确文本');
                         if (html) console.log('     控件HTML: ' + html);
                     });
                     try {
                         const un = this._collectUnanswerable(doc, items.map((it) => it.block));
                         if (un.length) {
                             console.log('   —— 以下 ' + un.length + ' 题无标准控件（排序 / 连线等，需适配）——');
-                            un.forEach((el) => {
-                                console.log('   [无控件] ' + this._getQuestionText(el).slice(0, 50));
-                                console.log('      HTML: ' + (el.innerHTML || '').replace(/\s+/g, ' ').slice(0, 260));
+                            un.forEach((el, ui) => {
+                                const stem = this._getQuestionText(el);
+                                console.log('   [无控件] #' + (ui + 1) + ' ' + stem.slice(0, 60));
+                                if (this._looksObfuscated(stem)) console.log('      ⚠️ 题干疑似字体加密（乱码）');
+                                console.log('      直接子节点: ' + (this._describeChildren(el) || '(无)') + '   （★=疑似选项/可点击）');
+                                console.log('      控件统计: input/textarea/contenteditable = ' + el.querySelectorAll('input, textarea, [contenteditable]').length +
+                                    '，img = ' + el.querySelectorAll('img').length + '，a = ' + el.querySelectorAll('a').length);
+                                console.log('      HTML: ' + (el.innerHTML || '').replace(/\s+/g, ' ').slice(0, 700));
                             });
                         }
                     } catch (err) { /* ignore */ }

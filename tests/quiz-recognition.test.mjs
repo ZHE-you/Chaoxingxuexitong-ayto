@@ -431,6 +431,18 @@ check('验证码输入框被识别为工具控件', api._isInsideToolUI(fCaptcha
 check('LaTeX 弹窗被识别为工具控件', api._isInsideToolUI(fLatex) === true, '');
 check('翻译框被识别为工具控件', api._isInsideToolUI(fTrans) === true, '');
 
+// ==================== 9. 字体反爬（字体加密）识别 ====================
+console.log('\n=== 9. 字体加密启发式识别 ===');
+// 学习通把题目正文换成乱码冷僻字（字形反爬），这些乱码高度集中在少数区间且密集出现
+check('识别出「字体加密」乱码题干（行列式→行罓式 等）',
+    api._looksObfuscated('【单选题】岢下罓构成的6阶行罓式岟开式的岣岥岤，岠“+”的有 ( )') === true, '');
+check('正常题干不误判为加密',
+    api._looksObfuscated('设三阶方阵 A 的特征值为 1,2(二重)，则 |A|=____') === false, '');
+check('短文本不误判',
+    api._looksObfuscated('【判断题】矩阵乘法满足交换律') === false, '');
+check('无 @font-face 时返回空数组',
+    api._findFontFaces(winF.document).length === 0, '');
+
 console.log('\n========================================');
 console.log(fail === 0 ? '全部通过：' + pass + ' 项' : '通过 ' + pass + ' 项，失败 ' + fail + ' 项');
 console.log('========================================');

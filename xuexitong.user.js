@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         学习通自动刷课脚本
 // @namespace    https://github.com/ZHE-you/Chaoxingxuexitong-ayto
-// @version      3.9.0
+// @version      3.10.0
 // @description  自动播放、自动切换下一节，并在页面结构异常时安全停止。单文件：可直接粘贴到浏览器控制台，也可导入 Tampermonkey。
 // @author       夏至子 (ZHE-you)
 // @homepageURL  https://github.com/ZHE-you/Chaoxingxuexitong-ayto
@@ -621,6 +621,7 @@ var XT_ENGINE = (() => {
         let count = 0;
         let submitted = 0;
         let manual = 0;
+        let obfuscated = 0;
         docs.forEach((doc) => {
           if (!doc) return;
           let items = [];
@@ -643,17 +644,87 @@ var XT_ENGINE = (() => {
           });
           try {
             this._collectUnanswerable(doc, items.map((it) => it.block)).forEach((el) => {
-              const txt = this._getQuestionText(el).slice(0, 40);
+              const stem = this._getQuestionText(el);
+              const txt = stem.slice(0, 40);
               if (!txt || seen["NA|" + txt]) return;
               seen["NA|" + txt] = true;
               manual++;
-              console.log("%c[AI\u7B54\u9898] \u8BE5\u9898\u6CA1\u6709\u6807\u51C6\u4F5C\u7B54\u63A7\u4EF6\uFF0C\u9700\u624B\u52A8\u5904\u7406\uFF1A" + txt, "color:#FF9800");
+              if (this._looksObfuscated(stem)) {
+                obfuscated++;
+                console.warn("%c[AI\u7B54\u9898] \u8BE5\u9898\u6587\u5B57\u7591\u4F3C\u300C\u5B57\u4F53\u52A0\u5BC6\u300D\uFF08\u4E71\u7801\uFF09\uFF0C\u65E0\u6CD5\u8BC6\u522B\uFF1A" + txt, "color:#FF9800");
+              } else {
+                console.log("%c[AI\u7B54\u9898] \u8BE5\u9898\u6CA1\u6709\u6807\u51C6\u4F5C\u7B54\u63A7\u4EF6\uFF0C\u9700\u624B\u52A8\u5904\u7406\uFF1A" + txt, "color:#FF9800");
+              }
             });
           } catch (e) {
           }
         });
-        console.log("%c[AI\u7B54\u9898] \u626B\u63CF\u5B8C\u6210\uFF1A\u8BC6\u522B\u9898\u76EE " + count + " \u4E2A\uFF0C\u63D0\u4EA4\u4F5C\u7B54 " + submitted + " \u4E2A" + (manual ? "\uFF0C\u9700\u624B\u52A8\u5904\u7406 " + manual + " \u4E2A" : ""), "color:#2196F3");
+        console.log("%c[AI\u7B54\u9898] \u626B\u63CF\u5B8C\u6210\uFF1A\u8BC6\u522B\u9898\u76EE " + count + " \u4E2A\uFF0C\u63D0\u4EA4\u4F5C\u7B54 " + submitted + " \u4E2A" + (manual ? "\uFF0C\u9700\u624B\u52A8\u5904\u7406 " + manual + " \u4E2A" : "") + (obfuscated ? "\uFF08\u5176\u4E2D " + obfuscated + " \u4E2A\u7591\u4F3C\u300C\u5B57\u4F53\u52A0\u5BC6\u300D\uFF0C\u8BF7\u70B9\u300C\u8BCA\u65AD\u300D\u67E5\u770B @font-face\uFF09" : ""), "color:#2196F3");
         return count;
+      },
+      // 扫描文档里的 @font-face（学习通的「字体反爬」会把题目正文换成自定义字体）。
+      // 返回 [{family, kind, preview}]，kind 为 base64嵌入 / URL / unknown。
+      _findFontFaces(doc) {
+        const out = [];
+        try {
+          const sheets = doc.styleSheets || [];
+          for (let i = 0; i < sheets.length; i++) {
+            let rules = null;
+            try {
+              rules = sheets[i].cssRules;
+            } catch (e) {
+              continue;
+            }
+            if (!rules) continue;
+            for (let j = 0; j < rules.length; j++) {
+              const r = rules[j];
+              const type = r.type;
+              const isFace = type === 5 || r.constructor && r.constructor.name === "CSSFontFaceRule";
+              if (!isFace) continue;
+              const style = r.style;
+              const src = style && style.getPropertyValue && style.getPropertyValue("src") || r.cssText || "";
+              let kind = "unknown", preview = String(src).slice(0, 160);
+              if (/data:/i.test(src)) {
+                const m = src.match(/data:([^;,]+)/i);
+                kind = "base64\u5D4C\u5165(" + (m ? m[1] : "") + ")";
+                preview = "data:\u2026\uFF08\u5171 " + src.length + " \u5B57\u7B26\uFF09";
+              } else if (/url\(/i.test(src)) {
+                const m = src.match(/url\((['"]?)([^'")]+)\1\)/i);
+                kind = "URL";
+                preview = m ? m[2].slice(0, 200) : preview;
+              }
+              const fam = style && style.getPropertyValue && style.getPropertyValue("font-family") || r.fontFamily || "";
+              out.push({ family: fam, kind, preview });
+            }
+          }
+        } catch (e) {
+        }
+        return out;
+      },
+      // 启发式判断一段文字是否被「字体反爬」加密：
+      // 学习通把常用字替换成一批冷僻字，这些冷僻字高度集中在少数区间且密集出现。
+      _looksObfuscated(text) {
+        const s = String(text || "");
+        if (s.length < 8) return false;
+        const rare = /[\u3400-\u4DBF\u5C90-\u5D30\u7F50-\u7F60\u9FA6-\u9FFF]/g;
+        const m = s.match(rare);
+        const n = m ? m.length : 0;
+        return n >= 3 && n / s.length > 0.15;
+      },
+      // 简要描述一个元素的直接子节点（tag.class），并标出疑似「选项 / 可点击」的元素。
+      _describeChildren(el) {
+        const items = [];
+        try {
+          const kids = el.children || [];
+          for (let i = 0; i < kids.length && i < 12; i++) {
+            const k = kids[i];
+            const cls = k.className ? "." + String(k.className).trim().split(/\s+/).slice(0, 3).join(".") : "";
+            const clickable = !!k.onclick || /option|answer|choice|radio|select|item|topic|TiMu|ans/i.test(String(k.className || ""));
+            items.push(k.tagName.toLowerCase() + cls + (clickable ? "\u2605" : ""));
+          }
+        } catch (e) {
+        }
+        return items.join("  ");
       },
       // DOM 诊断：把识别过程与页面结构打印到控制台，便于在真实页面定位结构差异
       _diagnose() {
@@ -696,6 +767,27 @@ var XT_ENGINE = (() => {
           const isQuiz = markerCount > 0;
           const label = doc === document ? "\u4E3B\u6587\u6863" : "iframe #" + di;
           console.log("--- \u6587\u6863 #" + (di + 1) + "\uFF08" + label + "\uFF09\uFF1A\u53EF\u4F5C\u7B54\u63A7\u4EF6 " + ctrls.length + " \u4E2A\uFF0C\u8BC6\u522B\u9898\u76EE " + items.length + " \u4E2A\uFF1B\u9898\u578B\u6807\u7B7E " + markerCount + " \u4E2A \u2192 " + (isQuiz ? "\u7591\u4F3C\u6D4B\u9A8C\u6587\u6863" : "\u975E\u6D4B\u9A8C\u6587\u6863\uFF08\u6846\u67B6\u9875/\u5185\u5BB9\u9875\uFF0C\u53EF\u5FFD\u7565\uFF09") + " ---");
+          const faces = this._findFontFaces(doc);
+          if (faces.length) {
+            console.log("   \u26A0\uFE0F \u68C0\u6D4B\u5230 @font-face " + faces.length + " \u4E2A\uFF08\u53EF\u80FD\u662F\u5B57\u4F53\u53CD\u722C\uFF09\uFF1A");
+            faces.forEach((f, fi) => console.log("      [" + (fi + 1) + "] family=" + (f.family || "(\u7A7A)") + "  \u6765\u6E90=" + f.kind + "  " + f.preview));
+            let probe = items.length ? items[0].block : null;
+            if (!probe) {
+              try {
+                probe = doc.querySelector('.TiMu, .questionLi, .question, [class*="TiMu"]');
+              } catch (e) {
+              }
+            }
+            if (probe) {
+              let ff = "";
+              try {
+                ff = (doc.defaultView || window).getComputedStyle(probe).fontFamily || "";
+              } catch (e) {
+              }
+              console.log("      \u9898\u5757\u8BA1\u7B97\u5B57\u4F53 font-family: " + ff);
+            }
+            console.log("      \u2192 \u82E5\u9898\u5E72\u663E\u793A\u4E3A\u4E71\u7801\uFF0C\u8BF4\u660E\u6B63\u6587\u88AB\u5B57\u4F53\u52A0\u5BC6\uFF0C\u987B\u5148\u300C\u5B57\u4F53\u89E3\u5BC6\u300D\u624D\u80FD\u8BC6\u522B\u3002");
+          }
           items.forEach((it, k) => {
             const type = this._detectQuestionType(it.block, it.ctrls);
             const stem = this._getQuestionText(it.block);
@@ -715,15 +807,20 @@ var XT_ENGINE = (() => {
             console.log((real ? "  \u2705 " : "  \u26A0\uFE0F ") + "#" + (k + 1) + " [" + (TYPE_NAMES[type] || type) + "] \u63A7\u4EF6 " + it.ctrls.length + " \u4E2A" + (suspicious ? "\u3010\u53EF\u7591\uFF1A\u9898\u5E72\u4E3A\u7A7A\u6216\u50CF\u5DE5\u5177\u3011" : ""));
             console.log("     \u8DEF\u5F84: " + chain.join("  <  "));
             console.log("     \u9898\u5E72: " + stem.slice(0, 100));
+            if (this._looksObfuscated(stem)) console.log("     \u26A0\uFE0F \u8BE5\u9898\u5E72\u7591\u4F3C\u300C\u5B57\u4F53\u52A0\u5BC6\u300D\uFF08\u4E71\u7801\uFF09\uFF0C\u9700\u8981\u5B57\u4F53\u89E3\u5BC6\u540E\u624D\u6709\u6B63\u786E\u6587\u672C");
             if (html) console.log("     \u63A7\u4EF6HTML: " + html);
           });
           try {
             const un = this._collectUnanswerable(doc, items.map((it) => it.block));
             if (un.length) {
               console.log("   \u2014\u2014 \u4EE5\u4E0B " + un.length + " \u9898\u65E0\u6807\u51C6\u63A7\u4EF6\uFF08\u6392\u5E8F / \u8FDE\u7EBF\u7B49\uFF0C\u9700\u9002\u914D\uFF09\u2014\u2014");
-              un.forEach((el) => {
-                console.log("   [\u65E0\u63A7\u4EF6] " + this._getQuestionText(el).slice(0, 50));
-                console.log("      HTML: " + (el.innerHTML || "").replace(/\s+/g, " ").slice(0, 260));
+              un.forEach((el, ui) => {
+                const stem = this._getQuestionText(el);
+                console.log("   [\u65E0\u63A7\u4EF6] #" + (ui + 1) + " " + stem.slice(0, 60));
+                if (this._looksObfuscated(stem)) console.log("      \u26A0\uFE0F \u9898\u5E72\u7591\u4F3C\u5B57\u4F53\u52A0\u5BC6\uFF08\u4E71\u7801\uFF09");
+                console.log("      \u76F4\u63A5\u5B50\u8282\u70B9: " + (this._describeChildren(el) || "(\u65E0)") + "   \uFF08\u2605=\u7591\u4F3C\u9009\u9879/\u53EF\u70B9\u51FB\uFF09");
+                console.log("      \u63A7\u4EF6\u7EDF\u8BA1: input/textarea/contenteditable = " + el.querySelectorAll("input, textarea, [contenteditable]").length + "\uFF0Cimg = " + el.querySelectorAll("img").length + "\uFF0Ca = " + el.querySelectorAll("a").length);
+                console.log("      HTML: " + (el.innerHTML || "").replace(/\s+/g, " ").slice(0, 700));
               });
             }
           } catch (err) {
