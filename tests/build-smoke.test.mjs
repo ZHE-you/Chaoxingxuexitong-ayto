@@ -88,6 +88,17 @@ check('src/core 引擎方法已全部注入 app', missing.length === 0, missing.
 check('app 上仍保留存量模块（如 _getQuestionDocuments）',
     !!app && typeof app._getQuestionDocuments === 'function', String(app && typeof app._getQuestionDocuments));
 
+// 控制面板：由 src/ui 注入，应已挂到页面上，且关键控件齐全
+const doc = dom.window.document;
+const panel = doc.getElementById('xtControlPanel');
+check('控制面板已注入页面', !!panel, String(!!panel));
+const needIds = ['xtState', 'xtInfo', 'xtSpeed', 'xtPlay', 'xtPause', 'xtNext',
+    'xtAutoplay', 'xtAiEnable', 'xtAiScan', 'xtAiDiag', 'xtAiSource'];
+const missIds = needIds.filter((id) => !doc.getElementById(id));
+check('面板关键控件齐全（' + needIds.length + ' 项）', missIds.length === 0, missIds.join(','));
+check('面板样式已注入（<style> 含 #xtControlPanel）',
+    !!doc.querySelector('style') && /#xtControlPanel/.test(Array.from(doc.querySelectorAll('style')).map((s) => s.textContent).join('')));
+
 console.log('\n========================================');
 console.log(fail === 0 ? '冒烟测试通过：' + pass + ' 项' : '通过 ' + pass + ' 项，失败 ' + fail + ' 项');
 console.log('========================================');

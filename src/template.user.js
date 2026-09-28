@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         学习通自动刷课脚本
 // @namespace    https://github.com/ZHE-you/Chaoxingxuexitong-ayto
-// @version      3.7.0
+// @version      3.8.0
 // @description  自动播放、自动切换下一节，并在页面结构异常时安全停止。单文件：可直接粘贴到浏览器控制台，也可导入 Tampermonkey。
 // @author       夏至子 (ZHE-you)
 // @homepageURL  https://github.com/ZHE-you/Chaoxingxuexitong-ayto
@@ -161,6 +161,8 @@
 
     // ==XT-BUILD:TYPES:START==
     // ==XT-BUILD:TYPES:END==
+    // ==XT-BUILD:UI-BUNDLE:START==
+    // ==XT-BUILD:UI-BUNDLE:END==
     // 脚本自身控制面板的 id：识别题目时必须排除它（面板里也有 checkbox）
     const PANEL_ID = 'xtControlPanel';
 
@@ -818,88 +820,14 @@
             },
             _buildUI() {
                 if (document.getElementById('xtControlPanel')) return;
-                const css = `
-#xtControlPanel{position:fixed;top:16px;right:16px;z-index:2147483647;width:248px;font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;font-size:13px;color:#222;background:#fff;border:1px solid #e0e0e0;border-radius:10px;box-shadow:0 6px 24px rgba(0,0,0,.18);user-select:none;overflow:hidden;}
-#xtControlPanel .xt-header{display:flex;align-items:center;justify-content:space-between;padding:8px 10px;background:linear-gradient(135deg,#3b82f6,#2563eb);color:#fff;cursor:move;font-weight:600;}
-#xtControlPanel .xt-min{background:rgba(255,255,255,.25);border:none;color:#fff;width:22px;height:22px;border-radius:5px;cursor:pointer;font-size:14px;line-height:1;}
-#xtControlPanel .xt-body{padding:10px;}
-#xtControlPanel.xt-collapsed .xt-body{display:none;}
-#xtControlPanel .xt-status{font-size:12px;color:#555;margin-bottom:2px;}
-#xtControlPanel .xt-status b{color:#2563eb;}
-#xtControlPanel .xt-info{font-size:11px;color:#888;margin-bottom:8px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
-#xtControlPanel .xt-row{display:flex;align-items:center;gap:6px;margin-bottom:8px;flex-wrap:wrap;}
-#xtControlPanel .xt-speed{flex-direction:column;align-items:stretch;gap:4px;}
-#xtControlPanel .xt-speed label{display:flex;justify-content:space-between;font-size:12px;color:#444;}
-#xtControlPanel input[type=range]{width:100%;}
-#xtControlPanel .xt-btn{flex:1;min-width:64px;padding:7px 4px;border:1px solid #d0d5dd;border-radius:7px;background:#f9fafb;color:#222;cursor:pointer;font-size:12px;}
-#xtControlPanel .xt-btn:hover{background:#eef2ff;}
-#xtControlPanel .xt-btn.xt-primary{background:#2563eb;color:#fff;border-color:#2563eb;}
-#xtControlPanel .xt-btn.xt-primary:hover{background:#1d4ed8;}
-#xtControlPanel .xt-btn.xt-danger{background:#fff;color:#dc2626;border-color:#fca5a5;}
-#xtControlPanel .xt-btn.xt-danger:hover{background:#fef2f2;}
-#xtControlPanel .xt-checks label{display:flex;align-items:center;gap:4px;font-size:12px;color:#444;flex:1;}
-#xtControlPanel .xt-tip{font-size:10px;color:#aaa;line-height:1.4;}
-#xtControlPanel details.xt-ai{margin:8px 0 4px;border-top:1px dashed #e0e0e0;padding-top:6px;}
-#xtControlPanel details.xt-ai>summary{cursor:pointer;font-size:12px;font-weight:600;color:#2563eb;outline:none;}
-#xtControlPanel .xt-ai-body{padding:6px 2px 0;}
-#xtControlPanel .xt-ai-en{display:flex;align-items:center;gap:4px;font-size:12px;color:#444;margin-bottom:6px;}
-#xtControlPanel .xt-ai-stat{font-size:11px;color:#888;margin-bottom:6px;word-break:break-all;}
-#xtControlPanel .xt-inp{width:100%;box-sizing:border-box;margin-bottom:5px;padding:5px;border:1px solid #d0d5dd;border-radius:6px;font-size:12px;}
-#xtControlPanel .xt-ai-body .xt-btn{margin-bottom:5px;}
-#xtControlPanel details.xt-ai-adv{margin-top:4px;}
-#xtControlPanel details.xt-ai-adv>summary{cursor:pointer;font-size:11px;color:#666;outline:none;}
-#xtControlPanel .xt-sel{width:100%;box-sizing:border-box;margin:3px 0;padding:4px 6px;border:1px solid #d0d7de;border-radius:4px;font-size:11px;background:#fff;color:#24292f;outline:none;}
-#xtControlPanel details.xt-ai-adv .xt-sel{margin-top:2px;}
-`;
+                const css = XT_UI.PANEL_CSS;
                 const style = document.createElement('style');
                 style.textContent = css;
                 document.head.appendChild(style);
 
                 const panel = document.createElement('div');
                 panel.id = 'xtControlPanel';
-                panel.innerHTML =
-                    '<div class="xt-header"><span>学习通刷课控制台</span><button class="xt-min" title="收起/展开">—</button></div>' +
-                    '<div class="xt-body">' +
-                        '<div class="xt-status">状态：<b id="xtState">空闲</b></div>' +
-                        '<div class="xt-info" id="xtInfo">—</div>' +
-                        '<div class="xt-row xt-speed"><label>播放倍速 <span id="xtSpeedVal">1.5</span>x</label><input type="range" id="xtSpeed" min="0.5" max="4" step="0.5" value="1.5"></div>' +
-                        '<div class="xt-row xt-btns"><button id="xtPlay" class="xt-btn xt-primary">开始</button><button id="xtPause" class="xt-btn">暂停</button><button id="xtNext" class="xt-btn">下一节</button></div>' +
-                        '<div class="xt-row xt-btns"><button id="xtRerun" class="xt-btn">重新运行</button><button id="xtStop" class="xt-btn xt-danger">停止</button></div>' +
-                        '<div class="xt-row xt-checks"><label><input type="checkbox" id="xtAutoplay"> 自动播放</label><label><input type="checkbox" id="xtSkipNoVideo"> 无视频跳过</label></div>' +
-                        '<div class="xt-row xt-checks"><label><input type="checkbox" id="xtMuted"> 静音播放</label></div>' +
-                        '<details class="xt-ai" open><summary>🤖 AI 答题（题库优先）</summary>' +
-                        '<div class="xt-ai-body">' +
-                        '<label class="xt-ai-en"><input type="checkbox" id="xtAiEnable"> 启用自动答题</label>' +
-                        '<div class="xt-ai-stat" id="xtAiStat">已答 0 · 失败 0</div>' +
-                        '<select id="xtAiSource" class="xt-sel">' +
-                        '<option value="official">🆓 官方 AI（免费零配置）</option>' +
-                        '<option value="custom">🔧 自定义接口（需代理）</option>' +
-                        '<option value="auto">🔄 自动（官方优先+回落）</option>' +
-                        '</select>' +
-                        '<div class="xt-row xt-btns"><button id="xtAiScan" class="xt-btn">立即扫描</button><button id="xtAiDiag" class="xt-btn">诊断</button></div>' +
-                        '<div class="xt-row xt-btns"><button id="xtAiImport" class="xt-btn">导入题库</button><button id="xtAiExport" class="xt-btn">导出题库</button></div>' +
-                        '<details class="xt-ai-adv"><summary>⚡ 快速模式 / API 设置</summary>' +
-                        '<label class="xt-ai-en"><input type="checkbox" id="xtFastVideo"> ⚡ 快速学时上报（免真实播放）</label>' +
-                        '<select id="xtAiPreset" class="xt-sel">' +
-                        '<option value="">— 服务商快速填充 —</option>' +
-                        '<option value="deepseek">DeepSeek</option>' +
-                        '<option value="qwen">通义千问</option>' +
-                        '<option value="doubao">豆包（火山引擎）</option>' +
-                        '<option value="zhipu">智谱 GLM</option>' +
-                        '<option value="xinghuo">讯飞星火</option>' +
-                        '<option value="siliconflow">硅基流动</option>' +
-                        '<option value="openai">OpenAI</option>' +
-                        '<option value="local">本地代理 npm run proxy</option>' +
-                        '</select>' +
-                        '<input type="text" id="xtBankUrl" class="xt-inp" placeholder="外部题库接口 URL（可选，命中则不消耗 AI）">' +
-                        '<input type="text" id="xtAiBase" class="xt-inp" placeholder="API 地址（如 http://127.0.0.1:8787/v1/chat/completions）">' +
-                        '<input type="password" id="xtAiKey" class="xt-inp" placeholder="API Key（留空则由代理注入，推荐）">' +
-                        '<input type="text" id="xtAiModel" class="xt-inp" placeholder="模型名(默认 deepseek-chat)">' +
-                        '<div class="xt-tip">🔒 推荐把真实密钥写在代理的环境变量 / .env 里，此处留空即可——这样密钥不会存在浏览器中。</div>' +
-                        '</details>' +
-                        '</div></details>' +
-                        '<div class="xt-tip">倍速/静音即时生效；暂停后不再自动续播。配置自动保存。</div>' +
-                    '</div>';
+                panel.innerHTML = XT_UI.PANEL_HTML;
                 document.body.appendChild(panel);
 
                 const byId = (id) => document.getElementById(id);

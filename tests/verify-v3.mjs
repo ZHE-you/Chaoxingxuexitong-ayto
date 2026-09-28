@@ -18,6 +18,9 @@ const must = [
     'var XT_ENGINE',
     'createEngineMethods',
     'Object.assign(app, XT_ENGINE.createEngineMethods())',
+    'var XT_UI',
+    'XT_UI.PANEL_CSS',
+    'XT_UI.PANEL_HTML',
 ];
 const mustNot = ['==XT-BUILD:'];
 const errs = [];

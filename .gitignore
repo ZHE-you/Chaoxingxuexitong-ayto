@@ -32,3 +32,6 @@ pnpm-lock.yaml
 .env.*
 !.env.example
 *.xuexitong-proxy.env
+
+# 构建产物：控制面板预览页
+preview

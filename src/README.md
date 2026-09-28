@@ -9,11 +9,13 @@ src/
 │   ├── types.js        题型定义（标签正则 / 映射 / 中文名）
 │   ├── engine.js       识别引擎：控件收集 → 题目块锚定 → 题型判断 → 作答
 │   └── index.js        打包入口
+├── ui/              【前端/UI】控制面板样式与结构（已迁移 ✅）
+│   ├── panel.js        面板 CSS + HTML（单一来源；独立 CSS 好迭代）
+│   └── index.js        打包入口（全局 XT_UI）
 ├── template.user.js 构建模板：承载尚未迁移的存量代码 + 构建标记位
 └── (规划中，待逐块迁入)
     ├── ai/        官方 AI / 本地题库 / 外部题库 / 自定义接口
     ├── course/    视频播放控制 / 学时上报（含快速模式）
-    ├── ui/        控制面板（HTML 模板 + 独立 CSS + 交互）
     └── utils/     MD5、DOM 工具、本地存储
 ```
 
@@ -25,18 +27,20 @@ npm run verify    # 构建 + 产物校验 + 单元测试 + 冒烟测试（一条
 ```
 
 - 打包器：`esbuild-wasm`（纯 WASM，无原生依赖，克隆即可构建）。
-- `build.mjs` 以 `src/core/index.js` 为入口打包为 IIFE（全局 `XT_ENGINE`），注入模板的构建标记位：
-  - `==XT-BUILD:TYPES==` → 引擎包（含 `TYPE_*` 常量）
+- `build.mjs` 各模块打包为 IIFE，注入模板的构建标记位：
+  - `==XT-BUILD:TYPES==` → 引擎包 `src/core`（含 `TYPE_*` 常量，全局 `XT_ENGINE`）
+  - `==XT-BUILD:UI-BUNDLE==` → 面板包 `src/ui`（全局 `XT_UI`：`PANEL_CSS` / `PANEL_HTML`）
   - `==XT-BUILD:ENGINE==` → 由 `src/core` 注入（模板此块留空）
   - `==XT-BUILD:MOUNT==` → `Object.assign(app, XT_ENGINE.createEngineMethods())`
+- 附带产出 `preview/panel.html`：控制面板独立预览页（与线上同源），方便前端/UI 快速迭代。
 
 ## 迁移进度
 
 | 模块 | 状态 | 说明 |
 | --- | --- | --- |
 | `core`（题型识别 / 作答） | ✅ 已迁移 | 唯一来源为 `src/core/*.js`，模板中不再保留副本 |
+| `ui`（控制面板样式/结构） | ✅ 已迁移 | CSS/HTML 唯一来源为 `src/ui/panel.js`；面板**交互逻辑**仍在模板，待后续迁入 |
 | `utils`（md5 / dom / storage） | ⬜ 待迁移 | 暂留在 `src/template.user.js` |
-| `ui`（控制面板） | ⬜ 待迁移 | 暂留在模板 |
 | `ai`（AI / 题库） | ⬜ 待迁移 | 暂留在模板 |
 | `course`（播放 / 学时） | ⬜ 待迁移 | 暂留在模板 |
 
